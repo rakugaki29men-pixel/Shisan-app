@@ -136,6 +136,8 @@ function defaultParamsState() {
     securities0: RAW.init.securities0,
     cash0: RAW.init.cash0,
     fxRate: RAW.portfolio.usdjpy || 150,
+    downPayment: 0,
+    housingSubsidyAnnual: 0,
   };
 }
 
@@ -254,7 +256,7 @@ function computeModel(sim, params) {
 
     if (params.housingType === 1) {
       if (i === houseStartIdx) {
-        loanBalance[i] = params.loanInitial;
+        loanBalance[i] = Math.max(0, params.loanInitial - (params.downPayment || 0));
         loanInterest[i] = 0;
       } else if (i > houseStartIdx) {
         const prevBal = loanBalance[i - 1];
@@ -268,7 +270,8 @@ function computeModel(sim, params) {
       const insurance = exp.housing_opt1_insurance[i] ?? 0;
       const repair = exp.housing_opt1_repair[i] ?? 0;
       const deduction = exp.housing_opt1_loanDeduction[i] ?? 0;
-      housingCost[i] = payment + propTax + insurance + repair - deduction;
+      const downPaymentCost = i === houseStartIdx ? (params.downPayment || 0) : 0;
+      housingCost[i] = payment + propTax + insurance + repair - deduction + downPaymentCost;
       realEstateAsset[i] = params.includeRealEstate ? saleEstimate[i] : 0;
     } else if (params.housingType === 2) {
       housingCost[i] = exp.housing_opt2_rent_relocate[i] ?? 0;
@@ -277,6 +280,7 @@ function computeModel(sim, params) {
     } else {
       housingCost[i] = exp.housing_opt4_rent_to_condo[i] ?? 0;
     }
+    housingCost[i] = Math.max(0, housingCost[i] - (params.housingSubsidyAnnual || 0));
   }
 
   const expenseTotal = zeros(), incomeTotal = zeros(), balance = zeros();
@@ -462,6 +466,301 @@ function EditTable({ rows }) {
    タブ1：シミュレーション（前提編集＋グラフ）
    ============================================================ */
 const HOUSING_LABELS = { 1: "戸建（購入）", 2: "賃貸→住替え", 3: "分譲中古", 4: "賃貸→分譲" };
+
+/* ============================================================
+   費用自動試算ウィザード：参考データ（2026年9月調べ・目安）
+   実際の金額は学校・物件・地域によって大きく異なるため、
+   あくまで初期値として提示し、必ず手入力で調整できるようにする
+   ============================================================ */
+const TUITION_BANDS = {
+  highschool: {
+    public: { label: "公立", perYear: 59.6, source: "3年間総額 約178.7万円（文部科学省「子供の学習費調査」）" },
+    private: { label: "私立", perYear: 102.6, source: "3年間総額 約307.7万円（同調査）" },
+  },
+  university: {
+    national: { label: "国公立（4年制）", firstYear: 82, laterYear: 53.6, years: 4, source: "初年度納付金の標準額（入学料28.2万円＋授業料53.6万円）" },
+    nationalLong: { label: "国公立（医歯薬等6年制）", firstYear: 82, laterYear: 53.6, years: 6, source: "6年間総額 目安 約350万円" },
+    privateArts: { label: "私立文系", firstYear: 128, laterYear: 97, years: 4, source: "初年度納付金 平均約128万円／2年目以降は平均授業料 約96.8万円" },
+    privateScience: { label: "私立理系", firstYear: 168, laterYear: 107, years: 4, source: "文系より高め（目安。学部差が大きいため必ず確認してください）" },
+  },
+  privateMedicalNote: "私立の医歯系学部は学校による差が非常に大きく（6年間で数千万円規模になることも）、自動試算の対象外にしています。個別に確認のうえ「一覧」タブで直接入力してください。",
+};
+
+const CAR_BANDS = {
+  kei: { label: "軽自動車", gas: 8, insurance: 5.1, tax: 1.08, inspection: 3, other: 3, source: "年間目安 合計 約20万円/台" },
+  compact: { label: "コンパクトカー", gas: 10, insurance: 5.5, tax: 3, inspection: 3.5, other: 4, source: "年間目安 合計 約26万円/台" },
+  standard: { label: "普通車", gas: 12, insurance: 7.5, tax: 4, inspection: 4, other: 5, source: "年間目安 合計 約32.5万円/台" },
+};
+const CAR_SOURCE_NOTE = "任意保険・ガソリン代はSBI損保／イオン銀行の調査、税金は総排気量に応じた自動車税の目安値を参照。駐車場代は地域差が非常に大きいため含めていません。";
+
+const HOUSE_REPAIR_FLAT_ANNUAL = 40; // 万円/年（戸建て30年総額 約1,200万円の目安から）
+const HOUSE_REPAIR_SOURCE = "マンション修繕積立金の目安：専有面積1㎡あたり月200〜300円（国土交通省ガイドライン）。戸建て30年間の修繕総額の目安：500万〜1,200万円（年平均 約40万円。築10年目に給湯器・防蟻、築15〜20年目に外壁・屋根の出費が集中する傾向）。";
+
+function PillChoice({ options, value, onChange }) {
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      {options.map((o) => (
+        <button key={String(o.value)} onClick={() => onChange(o.value)} style={{
+          padding: "6px 10px", fontSize: 12, borderRadius: 4, cursor: "pointer", textAlign: "left",
+          border: `1px solid ${value === o.value ? GOLD : PAPER_LINE}`,
+          background: value === o.value ? GOLD_SOFT : "#fff", color: INK,
+        }}>{o.label}</button>
+      ))}
+    </div>
+  );
+}
+
+function WizardRefBox({ children }) {
+  return (
+    <div style={{ fontSize: 11, color: INK_SOFT, background: GOLD_SOFT, borderLeft: `3px solid ${GOLD}`, borderRadius: "0 4px 4px 0", padding: "8px 10px", marginTop: 8 }}>
+      {children}
+    </div>
+  );
+}
+
+function WizardAppliedNote({ text }) {
+  if (!text) return null;
+  return <div style={{ fontSize: 12, color: SUMI, background: SUMI_SOFT, borderRadius: 4, padding: "6px 10px", marginTop: 10 }}>{text}</div>;
+}
+
+function TuitionWizardSlide({ sim, setSim, family }) {
+  const thisYear = new Date().getFullYear();
+  const supportedIds = ["child1", "child2", "child3"];
+  const eligible = family.filter((m) => supportedIds.includes(m.id) && m.birthYear != null);
+  const missing = family.filter((m) => supportedIds.includes(m.id) && m.birthYear == null);
+  const [selections, setSelections] = useState({});
+  const [applied, setApplied] = useState("");
+
+  const setSel = (childId, key, val) => setSelections((prev) => ({ ...prev, [childId]: { ...prev[childId], [key]: val } }));
+
+  const apply = () => {
+    setSim((prev) => {
+      const next = clone(prev);
+      eligible.forEach((m) => {
+        const sel = selections[m.id];
+        if (!sel) return;
+        const by = m.birthYear;
+        const arr = next.expense.tuition[m.id];
+        if (sel.highschool && TUITION_BANDS.highschool[sel.highschool]) {
+          const band = TUITION_BANDS.highschool[sel.highschool];
+          for (let y = by + 15; y <= by + 17; y++) {
+            const idx = YEARS.indexOf(y);
+            if (idx >= 0 && y >= thisYear) arr[idx] = band.perYear;
+          }
+        }
+        if (sel.university && TUITION_BANDS.university[sel.university]) {
+          const band = TUITION_BANDS.university[sel.university];
+          for (let k = 0; k < band.years; k++) {
+            const y = by + 18 + k;
+            const idx = YEARS.indexOf(y);
+            if (idx >= 0 && y >= thisYear) arr[idx] = k === 0 ? band.firstYear : band.laterYear;
+          }
+        }
+      });
+      return next;
+    });
+    setApplied("反映しました。「一覧」タブで年ごとの数値を確認・微調整できます。");
+    setTimeout(() => setApplied(""), 5000);
+  };
+
+  return (
+    <div>
+      <p style={{ fontSize: 12.5, color: INK_SOFT, margin: "0 0 14px" }}>
+        子1〜子3（家族構成で生年を設定した場合）の高校・大学の学費を、価格帯を選ぶだけで年別データに反映します。今年より前の年は変更しません。
+      </p>
+      {missing.length > 0 && (
+        <div style={{ fontSize: 12, color: SEAL, background: SEAL_SOFT, borderRadius: 4, padding: "8px 10px", marginBottom: 14 }}>
+          生年が未設定です：{missing.map((m) => m.label).join("、")}。先に「👪 家族構成」で生年を入力してください。
+        </div>
+      )}
+      {eligible.map((m) => {
+        const sel = selections[m.id] || {};
+        return (
+          <div key={m.id} style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 14, marginBottom: 14 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: INK, marginBottom: 10 }}>{m.label}（{m.birthYear}年生まれ）</div>
+
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: INK_SOFT, marginBottom: 6 }}>高校（{m.birthYear + 15}〜{m.birthYear + 17}年）</div>
+            <PillChoice
+              value={sel.highschool ?? null}
+              onChange={(v) => setSel(m.id, "highschool", v)}
+              options={[
+                { label: "変更しない", value: null },
+                ...Object.entries(TUITION_BANDS.highschool).map(([k, b]) => ({ label: `${b.label}（年${fmt(b.perYear, 1)}万円）`, value: k })),
+              ]}
+            />
+            <WizardRefBox>
+              参考：公立3年間 約178.7万円／私立3年間 約307.7万円（文部科学省「子供の学習費調査」）
+            </WizardRefBox>
+
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: INK_SOFT, margin: "14px 0 6px" }}>大学（{m.birthYear + 18}年〜）</div>
+            <PillChoice
+              value={sel.university ?? null}
+              onChange={(v) => setSel(m.id, "university", v)}
+              options={[
+                { label: "変更しない", value: null },
+                ...Object.entries(TUITION_BANDS.university).map(([k, b]) => ({ label: `${b.label}（初年度${fmt(b.firstYear, 1)}万円／以降年${fmt(b.laterYear, 1)}万円）`, value: k })),
+              ]}
+            />
+            <WizardRefBox>{TUITION_BANDS.privateMedicalNote}</WizardRefBox>
+          </div>
+        );
+      })}
+      {eligible.length > 0 && (
+        <button onClick={apply} style={{ fontSize: 13, padding: "10px 18px", borderRadius: 5, border: "none", background: GOLD, color: "#fff", fontWeight: 600, cursor: "pointer" }}>
+          学費の設定を反映
+        </button>
+      )}
+      <WizardAppliedNote text={applied} />
+    </div>
+  );
+}
+
+function HousingWizardSlide({ params, setParams, setSim }) {
+  const thisYear = new Date().getFullYear();
+  const [housingType, setHousingType] = useState(params.housingType);
+  const [downPayment, setDownPayment] = useState(params.downPayment || 0);
+  const [subsidy, setSubsidy] = useState(params.housingSubsidyAnnual || 0);
+  const [resetRepair, setResetRepair] = useState(false);
+  const [applied, setApplied] = useState("");
+
+  const apply = () => {
+    setParams((p) => ({ ...p, housingType, downPayment, housingSubsidyAnnual: subsidy }));
+    if (housingType === 1 && resetRepair) {
+      setSim((prev) => {
+        const next = clone(prev);
+        YEARS.forEach((y, idx) => { if (y >= thisYear) next.expense.housing_opt1_repair[idx] = HOUSE_REPAIR_FLAT_ANNUAL; });
+        return next;
+      });
+    }
+    setApplied("反映しました。「シミュレーション」タブで確認できます。");
+    setTimeout(() => setApplied(""), 5000);
+  };
+
+  return (
+    <div>
+      <p style={{ fontSize: 12.5, color: INK_SOFT, margin: "0 0 14px" }}>
+        住居プラン・頭金・会社の住宅補助を設定します。頭金はローンの借入額から差し引かれ、住宅補助は毎年の住宅費から差し引かれます。
+      </p>
+
+      <div style={{ fontSize: 11.5, fontWeight: 700, color: INK_SOFT, marginBottom: 6 }}>住居プラン</div>
+      <PillChoice
+        value={housingType}
+        onChange={setHousingType}
+        options={[1, 2, 3, 4].map((v) => ({ label: HOUSING_LABELS[v], value: v }))}
+      />
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
+        <label style={{ fontSize: 11.5, display: "flex", flexDirection: "column", gap: 4 }}>
+          頭金（万円）{housingType !== 1 && <span style={{ color: INK_SOFT }}>※戸建て購入の場合のみ反映</span>}
+          <input type="number" value={downPayment} onChange={(e) => setDownPayment(e.target.value === "" ? 0 : parseFloat(e.target.value))}
+            style={{ width: 120, padding: "6px 8px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, fontVariantNumeric: "tabular-nums" }} />
+        </label>
+        <label style={{ fontSize: 11.5, display: "flex", flexDirection: "column", gap: 4 }}>
+          会社の住宅補助（万円/年）
+          <input type="number" value={subsidy} onChange={(e) => setSubsidy(e.target.value === "" ? 0 : parseFloat(e.target.value))}
+            style={{ width: 120, padding: "6px 8px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, fontVariantNumeric: "tabular-nums" }} />
+        </label>
+      </div>
+
+      {housingType === 1 && (
+        <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 14, fontSize: 12.5, color: INK_SOFT }}>
+          <input type="checkbox" checked={resetRepair} onChange={(e) => setResetRepair(e.target.checked)} />
+          修繕費を目安値（今年以降 年{fmt(HOUSE_REPAIR_FLAT_ANNUAL)}万円）で一括設定する
+        </label>
+      )}
+      <WizardRefBox>{HOUSE_REPAIR_SOURCE}</WizardRefBox>
+
+      <div style={{ marginTop: 16 }}>
+        <button onClick={apply} style={{ fontSize: 13, padding: "10px 18px", borderRadius: 5, border: "none", background: GOLD, color: "#fff", fontWeight: 600, cursor: "pointer" }}>
+          住宅の設定を反映
+        </button>
+      </div>
+      <WizardAppliedNote text={applied} />
+    </div>
+  );
+}
+
+function CarWizardSlide({ setSim }) {
+  const thisYear = new Date().getFullYear();
+  const [cls, setCls] = useState("compact");
+  const [count, setCount] = useState(1);
+  const [applied, setApplied] = useState("");
+
+  const apply = () => {
+    const band = CAR_BANDS[cls];
+    setSim((prev) => {
+      const next = clone(prev);
+      YEARS.forEach((y, idx) => {
+        if (y < thisYear) return;
+        next.expense.car.gas[idx] = band.gas * count;
+        next.expense.car.insurance[idx] = band.insurance * count;
+        next.expense.car.tax[idx] = band.tax * count;
+        next.expense.car.inspection[idx] = band.inspection * count;
+        next.expense.car.other[idx] = band.other * count;
+      });
+      return next;
+    });
+    setApplied("反映しました。「一覧」タブで確認できます（本体価格・駐車場代は含みません）。");
+    setTimeout(() => setApplied(""), 5000);
+  };
+
+  return (
+    <div>
+      <p style={{ fontSize: 12.5, color: INK_SOFT, margin: "0 0 14px" }}>
+        車種区分と保有台数を選ぶと、今年以降のガソリン代・保険・税金・車検・その他費用を年別データに一括反映します。
+      </p>
+      <div style={{ fontSize: 11.5, fontWeight: 700, color: INK_SOFT, marginBottom: 6 }}>車種区分</div>
+      <PillChoice
+        value={cls}
+        onChange={setCls}
+        options={Object.entries(CAR_BANDS).map(([k, b]) => ({ label: `${b.label}（${b.source}）`, value: k }))}
+      />
+      <label style={{ fontSize: 11.5, display: "flex", flexDirection: "column", gap: 4, marginTop: 14, width: 120 }}>
+        保有台数
+        <input type="number" min={1} value={count} onChange={(e) => setCount(e.target.value === "" ? 1 : parseInt(e.target.value, 10))}
+          style={{ padding: "6px 8px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, fontVariantNumeric: "tabular-nums" }} />
+      </label>
+      <WizardRefBox>{CAR_SOURCE_NOTE}</WizardRefBox>
+      <div style={{ marginTop: 16 }}>
+        <button onClick={apply} style={{ fontSize: 13, padding: "10px 18px", borderRadius: 5, border: "none", background: GOLD, color: "#fff", fontWeight: 600, cursor: "pointer" }}>
+          車の設定を反映
+        </button>
+      </div>
+      <WizardAppliedNote text={applied} />
+    </div>
+  );
+}
+
+function CostWizardModal({ sim, setSim, params, setParams, family, onClose }) {
+  const [step, setStep] = useState("tuition");
+  const steps = [
+    { key: "tuition", label: "① 学費" },
+    { key: "housing", label: "② 住宅" },
+    { key: "car", label: "③ 車" },
+  ];
+  return (
+    <div style={{ position: "fixed", inset: 0, background: PAPER, zIndex: 200, overflowY: "auto", fontFamily: "'Noto Sans JP','Hiragino Sans',sans-serif" }}>
+      <div style={{ background: INK, color: PAPER, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, zIndex: 6 }}>
+        <div style={{ fontFamily: "'Shippori Mincho','Noto Serif JP',serif", fontSize: 17 }}>費用自動試算ウィザード</div>
+        <button onClick={onClose} style={{ background: "transparent", border: "1px solid #4A5A75", color: PAPER, borderRadius: 4, padding: "5px 10px", fontSize: 12, cursor: "pointer" }}>閉じる ×</button>
+      </div>
+      <div style={{ display: "flex", borderBottom: `2px solid ${INK}`, background: CARD, position: "sticky", top: 49, zIndex: 5 }}>
+        {steps.map((s) => (
+          <button key={s.key} onClick={() => setStep(s.key)} style={{
+            flex: 1, padding: "10px 4px", border: "none", cursor: "pointer",
+            background: step === s.key ? INK : "transparent", color: step === s.key ? PAPER : INK_SOFT,
+            fontSize: 13, fontWeight: 600,
+          }}>{s.label}</button>
+        ))}
+      </div>
+      <div style={{ padding: "16px 16px 60px" }}>
+        {step === "tuition" && <TuitionWizardSlide sim={sim} setSim={setSim} family={family} />}
+        {step === "housing" && <HousingWizardSlide params={params} setParams={setParams} setSim={setSim} />}
+        {step === "car" && <CarWizardSlide setSim={setSim} />}
+      </div>
+    </div>
+  );
+}
 
 /* ============================================================
    一覧タブ：全カテゴリ・全年を一枚のシートで見渡す（元ファイル相当）
@@ -1745,6 +2044,7 @@ export default function App() {
   const [yearSnapshots, setYearSnapshots] = useState({});
   const [family, setFamily] = useState(defaultFamilyState);
   const [showFamilyModal, setShowFamilyModal] = useState(false);
+  const [showCostWizard, setShowCostWizard] = useState(false);
   const saveTimer = useRef(null);
 
   useEffect(() => {
@@ -1836,6 +2136,10 @@ export default function App() {
             fontSize: 10.5, color: "#D8C089", background: "transparent", border: "1px solid #4A5A75",
             borderRadius: 4, padding: "5px 8px", cursor: "pointer", whiteSpace: "nowrap",
           }}>👪 家族構成</button>
+          <button onClick={() => setShowCostWizard(true)} style={{
+            fontSize: 10.5, color: "#D8C089", background: "transparent", border: "1px solid #4A5A75",
+            borderRadius: 4, padding: "5px 8px", cursor: "pointer", whiteSpace: "nowrap",
+          }}>🧮 費用ウィザード</button>
           <button onClick={exportData} style={{
             fontSize: 10.5, color: "#D8C089", background: "transparent", border: "1px solid #4A5A75",
             borderRadius: 4, padding: "5px 8px", cursor: "pointer", whiteSpace: "nowrap",
@@ -1852,6 +2156,9 @@ export default function App() {
         </div>
       </div>
       {showFamilyModal && <FamilySetupModal family={family} setFamily={setFamily} onClose={() => setShowFamilyModal(false)} />}
+      {showCostWizard && (
+        <CostWizardModal sim={sim} setSim={setSim} params={params} setParams={setParams} family={family} onClose={() => setShowCostWizard(false)} />
+      )}
       {saveNote && (
         <div style={{ position: "fixed", top: 8, right: 8, background: SUMI, color: "#fff", fontSize: 11, padding: "4px 10px", borderRadius: 12, zIndex: 100 }}>
           {saveNote}
