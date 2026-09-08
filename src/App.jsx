@@ -473,8 +473,12 @@ const HOUSING_LABELS = { 1: "戸建（購入）", 2: "賃貸→住替え", 3: "�
    あくまで初期値として提示し、必ず手入力で調整できるようにする
    ============================================================ */
 const TUITION_BANDS = {
+  juniorhigh: {
+    public: { label: "公立", perYear: 54.2, source: "3年間総額 約162.6万円（文部科学省 令和5年度 子供の学習費調査）" },
+    private: { label: "私立", perYear: 155.7, source: "3年間総額 約467.2万円（同調査）" },
+  },
   highschool: {
-    public: { label: "公立", perYear: 59.6, source: "3年間総額 約178.7万円（文部科学省「子供の学習費調査」）" },
+    public: { label: "公立", perYear: 59.6, source: "3年間総額 約178.7万円（文部科学省 令和5年度 子供の学習費調査）" },
     private: { label: "私立", perYear: 102.6, source: "3年間総額 約307.7万円（同調査）" },
   },
   university: {
@@ -523,6 +527,32 @@ function WizardAppliedNote({ text }) {
   return <div style={{ fontSize: 12, color: SUMI, background: SUMI_SOFT, borderRadius: 4, padding: "6px 10px", marginTop: 10 }}>{text}</div>;
 }
 
+function TuitionStageSelector({ title, yearRangeLabel, bandGroup, refNote, sel, onChange }) {
+  const mode = sel?.mode ?? null;
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ fontSize: 11.5, fontWeight: 700, color: INK_SOFT, marginBottom: 6 }}>{title}（{yearRangeLabel}）</div>
+      <PillChoice
+        value={mode}
+        onChange={(v) => onChange({ mode: v })}
+        options={[
+          { label: "変更しない", value: null },
+          ...Object.entries(bandGroup).map(([k, b]) => ({ label: `${b.label}（${b.firstYear != null ? `初年度${fmt(b.firstYear, 1)}万円／以降年${fmt(b.laterYear, 1)}万円` : `年${fmt(b.perYear, 1)}万円`}）`, value: k })),
+          { label: "自由入力（年額）", value: "custom" },
+        ]}
+      />
+      {mode === "custom" && (
+        <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 12 }}>
+          年額（万円）
+          <input type="number" value={sel.customValue ?? ""} onChange={(e) => onChange({ mode: "custom", customValue: e.target.value === "" ? 0 : parseFloat(e.target.value) })}
+            style={{ width: 100, padding: "5px 7px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, fontVariantNumeric: "tabular-nums" }} />
+        </label>
+      )}
+      {refNote && <WizardRefBox>{refNote}</WizardRefBox>}
+    </div>
+  );
+}
+
 function TuitionWizardSlide({ sim, setSim, family }) {
   const thisYear = new Date().getFullYear();
   const supportedIds = ["child1", "child2", "child3"];
@@ -531,7 +561,34 @@ function TuitionWizardSlide({ sim, setSim, family }) {
   const [selections, setSelections] = useState({});
   const [applied, setApplied] = useState("");
 
-  const setSel = (childId, key, val) => setSelections((prev) => ({ ...prev, [childId]: { ...prev[childId], [key]: val } }));
+  const setSel = (childId, stage, patch) => setSelections((prev) => ({
+    ...prev, [childId]: { ...prev[childId], [stage]: { ...(prev[childId]?.[stage] || {}), ...patch } },
+  }));
+
+  const applyStage = (arr, sel, yearStart, yearEnd, thisYear, band) => {
+    if (!sel || !sel.mode) return;
+    if (sel.mode === "custom") {
+      for (let y = yearStart; y <= yearEnd; y++) {
+        const idx = YEARS.indexOf(y);
+        if (idx >= 0 && y >= thisYear) arr[idx] = sel.customValue || 0;
+      }
+      return;
+    }
+    const b = band[sel.mode];
+    if (!b) return;
+    if (b.perYear != null) {
+      for (let y = yearStart; y <= yearEnd; y++) {
+        const idx = YEARS.indexOf(y);
+        if (idx >= 0 && y >= thisYear) arr[idx] = b.perYear;
+      }
+    } else {
+      for (let k = 0; k < b.years; k++) {
+        const y = yearStart + k;
+        const idx = YEARS.indexOf(y);
+        if (idx >= 0 && y >= thisYear) arr[idx] = k === 0 ? b.firstYear : b.laterYear;
+      }
+    }
+  };
 
   const apply = () => {
     setSim((prev) => {
@@ -541,21 +598,9 @@ function TuitionWizardSlide({ sim, setSim, family }) {
         if (!sel) return;
         const by = m.birthYear;
         const arr = next.expense.tuition[m.id];
-        if (sel.highschool && TUITION_BANDS.highschool[sel.highschool]) {
-          const band = TUITION_BANDS.highschool[sel.highschool];
-          for (let y = by + 15; y <= by + 17; y++) {
-            const idx = YEARS.indexOf(y);
-            if (idx >= 0 && y >= thisYear) arr[idx] = band.perYear;
-          }
-        }
-        if (sel.university && TUITION_BANDS.university[sel.university]) {
-          const band = TUITION_BANDS.university[sel.university];
-          for (let k = 0; k < band.years; k++) {
-            const y = by + 18 + k;
-            const idx = YEARS.indexOf(y);
-            if (idx >= 0 && y >= thisYear) arr[idx] = k === 0 ? band.firstYear : band.laterYear;
-          }
-        }
+        applyStage(arr, sel.juniorhigh, by + 12, by + 14, thisYear, TUITION_BANDS.juniorhigh);
+        applyStage(arr, sel.highschool, by + 15, by + 17, thisYear, TUITION_BANDS.highschool);
+        applyStage(arr, sel.university, by + 18, by + 18 + ((sel.university?.mode && TUITION_BANDS.university[sel.university.mode]?.years) || 4) - 1, thisYear, TUITION_BANDS.university);
       });
       return next;
     });
@@ -566,7 +611,7 @@ function TuitionWizardSlide({ sim, setSim, family }) {
   return (
     <div>
       <p style={{ fontSize: 12.5, color: INK_SOFT, margin: "0 0 14px" }}>
-        子1〜子3（家族構成で生年を設定した場合）の高校・大学の学費を、価格帯を選ぶだけで年別データに反映します。今年より前の年は変更しません。
+        子1〜子3（家族構成で生年を設定した場合）の中学・高校・大学の学費を、価格帯を選ぶか、自分で年額を入力して年別データに反映します。今年より前の年は変更しません。
       </p>
       {missing.length > 0 && (
         <div style={{ fontSize: 12, color: SEAL, background: SEAL_SOFT, borderRadius: 4, padding: "8px 10px", marginBottom: 14 }}>
@@ -577,31 +622,26 @@ function TuitionWizardSlide({ sim, setSim, family }) {
         const sel = selections[m.id] || {};
         return (
           <div key={m.id} style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 14, marginBottom: 14 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: INK, marginBottom: 10 }}>{m.label}（{m.birthYear}年生まれ）</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: INK, marginBottom: 4 }}>{m.label}（{m.birthYear}年生まれ）</div>
 
-            <div style={{ fontSize: 11.5, fontWeight: 700, color: INK_SOFT, marginBottom: 6 }}>高校（{m.birthYear + 15}〜{m.birthYear + 17}年）</div>
-            <PillChoice
-              value={sel.highschool ?? null}
-              onChange={(v) => setSel(m.id, "highschool", v)}
-              options={[
-                { label: "変更しない", value: null },
-                ...Object.entries(TUITION_BANDS.highschool).map(([k, b]) => ({ label: `${b.label}（年${fmt(b.perYear, 1)}万円）`, value: k })),
-              ]}
+            <TuitionStageSelector
+              title="中学" yearRangeLabel={`${m.birthYear + 12}〜${m.birthYear + 14}年`}
+              bandGroup={TUITION_BANDS.juniorhigh}
+              refNote="参考：公立3年間 約162.6万円／私立3年間 約467.2万円（文部科学省 令和5年度 子供の学習費調査）"
+              sel={sel.juniorhigh} onChange={(patch) => setSel(m.id, "juniorhigh", patch)}
             />
-            <WizardRefBox>
-              参考：公立3年間 約178.7万円／私立3年間 約307.7万円（文部科学省「子供の学習費調査」）
-            </WizardRefBox>
-
-            <div style={{ fontSize: 11.5, fontWeight: 700, color: INK_SOFT, margin: "14px 0 6px" }}>大学（{m.birthYear + 18}年〜）</div>
-            <PillChoice
-              value={sel.university ?? null}
-              onChange={(v) => setSel(m.id, "university", v)}
-              options={[
-                { label: "変更しない", value: null },
-                ...Object.entries(TUITION_BANDS.university).map(([k, b]) => ({ label: `${b.label}（初年度${fmt(b.firstYear, 1)}万円／以降年${fmt(b.laterYear, 1)}万円）`, value: k })),
-              ]}
+            <TuitionStageSelector
+              title="高校" yearRangeLabel={`${m.birthYear + 15}〜${m.birthYear + 17}年`}
+              bandGroup={TUITION_BANDS.highschool}
+              refNote="参考：公立3年間 約178.7万円／私立3年間 約307.7万円（同調査）"
+              sel={sel.highschool} onChange={(patch) => setSel(m.id, "highschool", patch)}
             />
-            <WizardRefBox>{TUITION_BANDS.privateMedicalNote}</WizardRefBox>
+            <TuitionStageSelector
+              title="大学" yearRangeLabel={`${m.birthYear + 18}年〜`}
+              bandGroup={TUITION_BANDS.university}
+              refNote={TUITION_BANDS.privateMedicalNote}
+              sel={sel.university} onChange={(patch) => setSel(m.id, "university", patch)}
+            />
           </div>
         );
       })}
@@ -683,44 +723,92 @@ function HousingWizardSlide({ params, setParams, setSim }) {
 function CarWizardSlide({ setSim }) {
   const thisYear = new Date().getFullYear();
   const [cls, setCls] = useState("compact");
+  const [customTotal, setCustomTotal] = useState(30);
   const [count, setCount] = useState(1);
+  const [bodyYear, setBodyYear] = useState("");
+  const [bodyPrice, setBodyPrice] = useState("");
+  const [parkingMonthly, setParkingMonthly] = useState("");
   const [applied, setApplied] = useState("");
 
   const apply = () => {
-    const band = CAR_BANDS[cls];
     setSim((prev) => {
       const next = clone(prev);
       YEARS.forEach((y, idx) => {
         if (y < thisYear) return;
-        next.expense.car.gas[idx] = band.gas * count;
-        next.expense.car.insurance[idx] = band.insurance * count;
-        next.expense.car.tax[idx] = band.tax * count;
-        next.expense.car.inspection[idx] = band.inspection * count;
-        next.expense.car.other[idx] = band.other * count;
+        if (cls === "custom") {
+          next.expense.car.gas[idx] = 0;
+          next.expense.car.insurance[idx] = 0;
+          next.expense.car.tax[idx] = 0;
+          next.expense.car.inspection[idx] = 0;
+          next.expense.car.other[idx] = (customTotal || 0) * count;
+        } else {
+          const band = CAR_BANDS[cls];
+          next.expense.car.gas[idx] = band.gas * count;
+          next.expense.car.insurance[idx] = band.insurance * count;
+          next.expense.car.tax[idx] = band.tax * count;
+          next.expense.car.inspection[idx] = band.inspection * count;
+          next.expense.car.other[idx] = band.other * count;
+        }
+        if (parkingMonthly !== "") next.expense.car.parking[idx] = (parseFloat(parkingMonthly) || 0) * 12;
       });
+      if (bodyYear !== "" && bodyPrice !== "") {
+        const idx = YEARS.indexOf(parseInt(bodyYear, 10));
+        if (idx >= 0 && YEARS[idx] >= thisYear) next.expense.car.body[idx] = parseFloat(bodyPrice) || 0;
+      }
       return next;
     });
-    setApplied("反映しました。「一覧」タブで確認できます（本体価格・駐車場代は含みません）。");
+    setApplied("反映しました。「一覧」タブで確認できます。");
     setTimeout(() => setApplied(""), 5000);
   };
 
   return (
     <div>
       <p style={{ fontSize: 12.5, color: INK_SOFT, margin: "0 0 14px" }}>
-        車種区分と保有台数を選ぶと、今年以降のガソリン代・保険・税金・車検・その他費用を年別データに一括反映します。
+        車種区分と保有台数を選ぶと、今年以降のガソリン代・保険・税金・車検・その他費用を年別データに一括反映します。合わなければ「自由入力」で年間合計を直接指定できます。
       </p>
       <div style={{ fontSize: 11.5, fontWeight: 700, color: INK_SOFT, marginBottom: 6 }}>車種区分</div>
       <PillChoice
         value={cls}
         onChange={setCls}
-        options={Object.entries(CAR_BANDS).map(([k, b]) => ({ label: `${b.label}（${b.source}）`, value: k }))}
+        options={[
+          ...Object.entries(CAR_BANDS).map(([k, b]) => ({ label: `${b.label}（${b.source}）`, value: k })),
+          { label: "自由入力（年間合計）", value: "custom" },
+        ]}
       />
+      {cls === "custom" && (
+        <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 12 }}>
+          1台あたり年間合計（万円）
+          <input type="number" value={customTotal} onChange={(e) => setCustomTotal(e.target.value === "" ? 0 : parseFloat(e.target.value))}
+            style={{ width: 100, padding: "5px 7px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, fontVariantNumeric: "tabular-nums" }} />
+        </label>
+      )}
       <label style={{ fontSize: 11.5, display: "flex", flexDirection: "column", gap: 4, marginTop: 14, width: 120 }}>
         保有台数
         <input type="number" min={1} value={count} onChange={(e) => setCount(e.target.value === "" ? 1 : parseInt(e.target.value, 10))}
           style={{ padding: "6px 8px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, fontVariantNumeric: "tabular-nums" }} />
       </label>
       <WizardRefBox>{CAR_SOURCE_NOTE}</WizardRefBox>
+
+      <div style={{ fontSize: 11.5, fontWeight: 700, color: INK_SOFT, margin: "16px 0 6px" }}>本体・駐車場（任意・自由入力）</div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <label style={{ fontSize: 11.5, display: "flex", flexDirection: "column", gap: 4 }}>
+          買い替え年
+          <input type="number" placeholder="例：2030" value={bodyYear} onChange={(e) => setBodyYear(e.target.value)}
+            style={{ width: 100, padding: "6px 8px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, fontVariantNumeric: "tabular-nums" }} />
+        </label>
+        <label style={{ fontSize: 11.5, display: "flex", flexDirection: "column", gap: 4 }}>
+          車両本体価格（万円）
+          <input type="number" value={bodyPrice} onChange={(e) => setBodyPrice(e.target.value)}
+            style={{ width: 100, padding: "6px 8px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, fontVariantNumeric: "tabular-nums" }} />
+        </label>
+        <label style={{ fontSize: 11.5, display: "flex", flexDirection: "column", gap: 4 }}>
+          月極駐車場（万円/月）
+          <input type="number" value={parkingMonthly} onChange={(e) => setParkingMonthly(e.target.value)}
+            style={{ width: 100, padding: "6px 8px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, fontVariantNumeric: "tabular-nums" }} />
+        </label>
+      </div>
+      <div style={{ fontSize: 11, color: INK_SOFT, marginTop: 6 }}>買い替え年はその年に一度だけ計上します。駐車場は今年以降、毎年同額で反映します（地域差が大きいため目安は出していません）。</div>
+
       <div style={{ marginTop: 16 }}>
         <button onClick={apply} style={{ fontSize: 13, padding: "10px 18px", borderRadius: 5, border: "none", background: GOLD, color: "#fff", fontWeight: 600, cursor: "pointer" }}>
           車の設定を反映
