@@ -41,6 +41,9 @@ const YEARS = RAW.sim.years;
 const N = YEARS.length;
 const zeros = () => new Array(N).fill(0);
 const clone = (o) => JSON.parse(JSON.stringify(o));
+function fillForward(arr, i, v) {
+  for (let k = i; k < arr.length; k++) arr[k] = v;
+}
 
 function fmt(n, digits = 0) {
   if (n === null || n === undefined || Number.isNaN(n)) return "-";
@@ -50,7 +53,7 @@ function fmt(n, digits = 0) {
 const fmtMan = (n) => fmt(n) + " 万円";
 const fmtYen = (n) => "¥" + fmt(n);
 
-function defaultSimState() { return clone(RAW.sim); }
+function defaultSimState() { return { ...clone(RAW.sim), wizardTouched: [] }; }
 function defaultPortfolioState() { return clone(RAW.portfolio.holdings); }
 function defaultCashState() { return clone(RAW.cash); }
 
@@ -146,9 +149,11 @@ function defaultParamsState() {
     housingPlanDownPayment: 0,
     housingPlanRate: 0.01,
     housingPlanRateIncrease: 0,
+    housingPlanRateCap: 0.05,
     housingPlanRepaymentMode: "fixed",
     housingPlanTermYears: 35,
     housingPlanOtherAnnual: 0,
+    housingPlanRateOverrides: {},
     housingPlanMoveEnabled: false,
     housingPlanMoveYear: new Date().getFullYear() + 10,
     housingPlanMoveSaleProceeds: 0,
@@ -158,9 +163,11 @@ function defaultParamsState() {
     housingPlanMoveDownPayment: 0,
     housingPlanMoveRate: 0.01,
     housingPlanMoveRateIncrease: 0,
+    housingPlanMoveRateCap: 0.05,
     housingPlanMoveRepaymentMode: "fixed",
     housingPlanMoveTermYears: 30,
     housingPlanMoveOtherAnnual: 0,
+    housingPlanMoveRateOverrides: {},
   };
 }
 
@@ -261,15 +268,17 @@ function calcAnnuityPayment(principal, rate, years) {
 }
 
 function computeHousingPlan(params) {
-  const housingCost = zeros(), loanBalance = zeros(), realEstateAsset = zeros();
+  const housingCost = zeros(), loanBalance = zeros(), realEstateAsset = zeros(), rateArr = zeros();
   const purchaseIdx = YEARS.indexOf(params.housingPlanPurchaseYear);
   const moveIdx = params.housingPlanMoveEnabled ? YEARS.indexOf(params.housingPlanMoveYear) : -1;
   let regime = null;
 
-  const startRegime = (i, price, downPayment, rate, rateIncrease, mode, term, otherAnnual, oneTimeCashEffect) => {
-    regime = { startIdx: i, price, rate, rateIncrease: rateIncrease || 0, mode, term, otherAnnual: otherAnnual || 0 };
+  const startRegime = (i, price, downPayment, rate, rateIncrease, rateCap, mode, term, otherAnnual, overrides, oneTimeCashEffect) => {
+    regime = { startIdx: i, price, rateIncrease: rateIncrease || 0, rateCap: rateCap || 1, mode, term, otherAnnual: otherAnnual || 0, overrides: overrides || {} };
+    const initialRate = Math.min(regime.rateCap, regime.overrides[YEARS[i]] ?? (rate || 0));
+    rateArr[i] = initialRate;
     loanBalance[i] = Math.max(0, (price || 0) - (downPayment || 0));
-    regime.fixedPayment = calcAnnuityPayment(loanBalance[i], rate || 0, term || 1);
+    regime.fixedPayment = calcAnnuityPayment(loanBalance[i], initialRate, term || 1);
     housingCost[i] = regime.fixedPayment + regime.otherAnnual + (oneTimeCashEffect || 0);
     realEstateAsset[i] = params.includeRealEstate ? (price || 0) - loanBalance[i] : 0;
   };
@@ -277,20 +286,28 @@ function computeHousingPlan(params) {
   for (let i = 0; i < N; i++) {
     if (i === purchaseIdx) {
       startRegime(i, params.housingPlanPrice, params.housingPlanDownPayment, params.housingPlanRate,
-        params.housingPlanRateIncrease, params.housingPlanRepaymentMode, params.housingPlanTermYears, params.housingPlanOtherAnnual, 0);
+        params.housingPlanRateIncrease, params.housingPlanRateCap, params.housingPlanRepaymentMode, params.housingPlanTermYears,
+        params.housingPlanOtherAnnual, params.housingPlanRateOverrides, 0);
       continue;
     }
     if (i === moveIdx) {
       const cashEffect = (params.housingPlanMoveDownPayment || 0) - (params.housingPlanMoveSaleProceeds || 0);
       startRegime(i, params.housingPlanMovePrice, params.housingPlanMoveDownPayment, params.housingPlanMoveRate,
-        params.housingPlanMoveRateIncrease, params.housingPlanMoveRepaymentMode, params.housingPlanMoveTermYears, params.housingPlanMoveOtherAnnual, cashEffect);
+        params.housingPlanMoveRateIncrease, params.housingPlanMoveRateCap, params.housingPlanMoveRepaymentMode, params.housingPlanMoveTermYears,
+        params.housingPlanMoveOtherAnnual, params.housingPlanMoveRateOverrides, cashEffect);
       continue;
     }
     if (!regime || i < regime.startIdx) continue;
     const yrsSince = i - regime.startIdx;
-    const currentRate = regime.rate + regime.rateIncrease * yrsSince;
+    const hasOverride = regime.overrides[YEARS[i]] !== undefined;
+    const naturalRate = regime.mode === "variable" ? rateArr[i - 1] + regime.rateIncrease : rateArr[i - 1];
+    const currentRate = Math.min(regime.rateCap, hasOverride ? regime.overrides[YEARS[i]] : naturalRate);
+    rateArr[i] = currentRate;
     const prevBal = loanBalance[i - 1];
     const interest = prevBal * currentRate;
+    if (regime.mode === "fixed" && hasOverride) {
+      regime.fixedPayment = calcAnnuityPayment(prevBal, currentRate, Math.max(1, regime.term - yrsSince));
+    }
     const payment = regime.mode === "variable"
       ? calcAnnuityPayment(prevBal, currentRate, Math.max(1, regime.term - yrsSince))
       : regime.fixedPayment;
@@ -298,7 +315,7 @@ function computeHousingPlan(params) {
     housingCost[i] = payment + regime.otherAnnual;
     realEstateAsset[i] = params.includeRealEstate ? regime.price - loanBalance[i] : 0;
   }
-  return { housingCost, loanBalance, realEstateAsset };
+  return { housingCost, loanBalance, realEstateAsset, rateArr };
 }
 
 function computeModel(sim, params) {
@@ -404,6 +421,7 @@ function computeModel(sim, params) {
   return {
     tuition, medical, carTotal, livingTotal, housingCost, loanBalance, loanInterest,
     buildingVal, landVal, saleEstimate, realEstateAsset,
+    housingRate: housingPlan ? housingPlan.rateArr : null,
     expenseTotal, incomeTotal, balance, dividend, securities, cash, assetTotal,
   };
 }
@@ -481,38 +499,47 @@ function NumField({ value, onChange, width = 74, suffix }) {
   );
 }
 
-function Accordion({ title, colorKey, defaultOpen, children, rightSlot }) {
+function Accordion({ title, colorKey, defaultOpen, children, rightSlot, onWizard, wizardLabel }) {
   const [open, setOpen] = useState(!!defaultOpen);
   const color = CAT_COLORS[colorKey] || INK;
   return (
     <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 5, marginBottom: 10, overflow: "hidden", background: CARD }}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        style={{
-          width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "10px 12px", background: "#FFFEFC", border: "none", cursor: "pointer", borderLeft: `5px solid ${color}`,
-        }}
-      >
-        <span style={{ fontSize: 14, fontWeight: 600, color: INK }}>{title}</span>
-        <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{
+        width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "10px 12px", background: "#FFFEFC", borderLeft: `5px solid ${color}`,
+      }}>
+        <button onClick={() => setOpen((o) => !o)} style={{
+          flex: 1, textAlign: "left", border: "none", background: "transparent", cursor: "pointer", padding: 0,
+          fontSize: 14, fontWeight: 600, color: INK,
+        }}>{title}</button>
+        <span style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
           {rightSlot}
-          <span style={{ fontSize: 12, color: INK_SOFT }}>{open ? "▲" : "▼"}</span>
+          {onWizard && (
+            <button onClick={onWizard} style={{
+              fontSize: 10.5, padding: "4px 8px", borderRadius: 4, border: `1px solid ${GOLD}`,
+              background: GOLD_SOFT, color: INK, cursor: "pointer", whiteSpace: "nowrap",
+            }}>🧮 {wizardLabel || "ウィザード"}</button>
+          )}
+          <button onClick={() => setOpen((o) => !o)} style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 12, color: INK_SOFT, padding: 0 }}>
+            {open ? "▲" : "▼"}
+          </button>
         </span>
-      </button>
+      </div>
       {open && <div style={{ padding: "10px 12px 14px" }}>{children}</div>}
     </div>
   );
 }
 
 // 横スクロール・年次編集テーブル（帳簿の見開きページ風）
-function YearRow({ label, arr, onChange, indent }) {
+function YearRow({ label, arr, onChange, indent, wizard }) {
+  const bg = wizard ? SUMI_SOFT : CARD;
   return (
     <div style={{ display: "flex", alignItems: "center", borderBottom: `1px solid ${PAPER_LINE}` }}>
       <div style={{
         width: 108, flexShrink: 0, fontSize: 12, color: indent ? INK_SOFT : INK, padding: "6px 8px 6px " + (indent ? "18px" : "8px"),
-        position: "sticky", left: 0, background: CARD, zIndex: 2, borderRight: `1px solid ${PAPER_LINE}`,
-      }}>{label}</div>
-      <div style={{ display: "flex" }}>
+        position: "sticky", left: 0, background: bg, zIndex: 2, borderRight: `1px solid ${PAPER_LINE}`,
+      }}>{label}{wizard && <span title="費用ウィザードで設定" style={{ marginLeft: 4 }}>🧮</span>}</div>
+      <div style={{ display: "flex", background: bg }}>
         {YEARS.map((y, i) => (
           <div key={y} style={{ padding: "5px 3px", borderRight: `1px solid ${PAPER_LINE}` }}>
             <NumField value={arr[i]} onChange={(v) => onChange(i, v)} />
@@ -542,7 +569,7 @@ function EditTable({ rows }) {
       <div style={{ minWidth: 108 + N * 82 }}>
         <YearHeader />
         {rows.map((r) => (
-          <YearRow key={r.label} label={r.label} arr={r.arr} onChange={r.onChange} indent={r.indent} />
+          <YearRow key={r.label} label={r.label} arr={r.arr} onChange={r.onChange} indent={r.indent} wizard={r.wizard} />
         ))}
       </div>
     </div>
@@ -614,6 +641,31 @@ function WizardAppliedNote({ text }) {
   return <div style={{ fontSize: 12, color: SUMI, background: SUMI_SOFT, borderRadius: 4, padding: "6px 10px", marginTop: 10 }}>{text}</div>;
 }
 
+function inferTuitionSelection(arr, yearStart, yearEnd, bandGroup) {
+  const idxStart = YEARS.indexOf(yearStart);
+  if (idxStart < 0) return null;
+  const idxEnd = Math.min(N - 1, YEARS.indexOf(yearEnd) >= 0 ? YEARS.indexOf(yearEnd) : idxStart);
+  const vals = [];
+  for (let i = idxStart; i <= idxEnd; i++) vals.push(arr[i] || 0);
+  if (vals.length === 0) return null;
+
+  for (const [k, b] of Object.entries(bandGroup)) {
+    if (b.perYear != null) {
+      if (vals.every((v) => Math.abs(v - b.perYear) < 0.05)) return { mode: k };
+    } else if (b.years) {
+      const span = Math.min(b.years, vals.length);
+      let matches = span > 0;
+      for (let i = 0; i < span; i++) {
+        const expected = i === 0 ? b.firstYear : b.laterYear;
+        if (Math.abs(vals[i] - expected) > 0.05) { matches = false; break; }
+      }
+      if (matches) return { mode: k };
+    }
+  }
+  const nonZero = vals.find((v) => v !== 0);
+  return nonZero !== undefined ? { mode: "custom", customValue: nonZero } : null;
+}
+
 function TuitionStageSelector({ title, yearRangeLabel, bandGroup, refNote, sel, onChange }) {
   const mode = sel?.mode ?? null;
   return (
@@ -623,7 +675,6 @@ function TuitionStageSelector({ title, yearRangeLabel, bandGroup, refNote, sel, 
         value={mode}
         onChange={(v) => onChange({ mode: v })}
         options={[
-          { label: "変更しない", value: null },
           ...Object.entries(bandGroup).map(([k, b]) => ({ label: `${b.label}（${b.firstYear != null ? `初年度${fmt(b.firstYear, 1)}万円／以降年${fmt(b.laterYear, 1)}万円` : `年${fmt(b.perYear, 1)}万円`}）`, value: k })),
           { label: "自由入力（年額）", value: "custom" },
         ]}
@@ -645,7 +696,19 @@ function TuitionWizardSlide({ sim, setSim, family }) {
   const supportedIds = ["child1", "child2", "child3"];
   const eligible = family.filter((m) => supportedIds.includes(m.id) && m.birthYear != null);
   const missing = family.filter((m) => supportedIds.includes(m.id) && m.birthYear == null);
-  const [selections, setSelections] = useState({});
+  const [selections, setSelections] = useState(() => {
+    const init = {};
+    eligible.forEach((m) => {
+      const by = m.birthYear;
+      const arr = sim.expense.tuition[m.id];
+      init[m.id] = {
+        juniorhigh: inferTuitionSelection(arr, by + 12, by + 14, TUITION_BANDS.juniorhigh),
+        highschool: inferTuitionSelection(arr, by + 15, by + 17, TUITION_BANDS.highschool),
+        university: inferTuitionSelection(arr, by + 18, by + 23, TUITION_BANDS.university),
+      };
+    });
+    return init;
+  });
   const [applied, setApplied] = useState("");
 
   const setSel = (childId, stage, patch) => setSelections((prev) => ({
@@ -680,6 +743,7 @@ function TuitionWizardSlide({ sim, setSim, family }) {
   const apply = () => {
     setSim((prev) => {
       const next = clone(prev);
+      const touched = new Set(next.wizardTouched || []);
       eligible.forEach((m) => {
         const sel = selections[m.id];
         if (!sel) return;
@@ -688,7 +752,9 @@ function TuitionWizardSlide({ sim, setSim, family }) {
         applyStage(arr, sel.juniorhigh, by + 12, by + 14, thisYear, TUITION_BANDS.juniorhigh);
         applyStage(arr, sel.highschool, by + 15, by + 17, thisYear, TUITION_BANDS.highschool);
         applyStage(arr, sel.university, by + 18, by + 18 + ((sel.university?.mode && TUITION_BANDS.university[sel.university.mode]?.years) || 4) - 1, thisYear, TUITION_BANDS.university);
+        if (sel.juniorhigh?.mode || sel.highschool?.mode || sel.university?.mode) touched.add(`tuition.${m.id}`);
       });
+      next.wizardTouched = [...touched];
       return next;
     });
     setApplied("反映しました。「一覧」タブで年ごとの数値を確認・微調整できます。");
@@ -743,11 +809,13 @@ function TuitionWizardSlide({ sim, setSim, family }) {
 }
 
 function NumInput({ label, value, onChange, width = 110, suffix }) {
+  const display = Number(value) === 0 ? "" : value;
   return (
     <label style={{ fontSize: 11.5, display: "flex", flexDirection: "column", gap: 4 }}>
       {label}
       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-        <input type="number" value={value} onChange={(e) => onChange(e.target.value === "" ? 0 : parseFloat(e.target.value))}
+        <input type="number" value={display} placeholder="0"
+          onChange={(e) => onChange(e.target.value === "" ? 0 : parseFloat(e.target.value))}
           style={{ width, padding: "6px 8px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, fontVariantNumeric: "tabular-nums" }} />
         {suffix && <span style={{ fontSize: 11, color: INK_SOFT }}>{suffix}</span>}
       </div>
@@ -758,31 +826,35 @@ function NumInput({ label, value, onChange, width = 110, suffix }) {
 function PropertyLoanFields({ plan, setPlan, prefix }) {
   const p = (key) => plan[`${prefix}${key}`];
   const set = (key) => (v) => setPlan({ [`${prefix}${key}`]: v });
+  const isVariable = p("RepaymentMode") === "variable";
   return (
     <>
       <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
         <PillChoice value={p("PropertyType")} onChange={set("PropertyType")}
           options={[{ label: "戸建て", value: "house" }, { label: "マンション", value: "condo" }]} />
-        <PillChoice value={p("Condition")} onChange={set("Condition")}
-          options={[{ label: "新築", value: "new" }, { label: "中古", value: "used" }]} />
       </div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
         <NumInput label="物件価格" value={p("Price")} onChange={set("Price")} suffix="万円" />
         <NumInput label="頭金" value={p("DownPayment")} onChange={set("DownPayment")} suffix="万円" />
       </div>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
-        <NumInput label="金利（初期・年率）" value={(p("Rate") * 100).toFixed(2)} onChange={(v) => set("Rate")(v / 100)} width={90} suffix="%" />
-        <NumInput label="金利上昇率（年率）" value={(p("RateIncrease") * 100).toFixed(2)} onChange={(v) => set("RateIncrease")(v / 100)} width={90} suffix="%/年" />
-        <NumInput label="ローン年数" value={p("TermYears")} onChange={set("TermYears")} width={80} suffix="年" />
-      </div>
       <div style={{ marginBottom: 4 }}>
         <div style={{ fontSize: 11, color: INK_SOFT, marginBottom: 4 }}>返済方式</div>
         <PillChoice value={p("RepaymentMode")} onChange={set("RepaymentMode")}
           options={[
-            { label: "固定返済額（金利が上がると完済が延びる）", value: "fixed" },
-            { label: "変動（毎年その時点の金利で再計算）", value: "variable" },
+            { label: "固定金利（借入時の金利のまま変わらない）", value: "fixed" },
+            { label: "変動金利（毎年、その時点の金利で返済額を再計算）", value: "variable" },
           ]}
         />
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10, marginBottom: 10 }}>
+        <NumInput label="金利（初期・年率）" value={(p("Rate") * 100).toFixed(2)} onChange={(v) => set("Rate")(v / 100)} width={90} suffix="%" />
+        {isVariable && (
+          <>
+            <NumInput label="金利上昇率（年率）" value={(p("RateIncrease") * 100).toFixed(2)} onChange={(v) => set("RateIncrease")(v / 100)} width={90} suffix="%/年" />
+            <NumInput label="金利の上限" value={(p("RateCap") * 100).toFixed(2)} onChange={(v) => set("RateCap")(v / 100)} width={90} suffix="%" />
+          </>
+        )}
+        <NumInput label="ローン年数" value={p("TermYears")} onChange={set("TermYears")} width={80} suffix="年" />
       </div>
       <NumInput label="その他年間費用（管理費・固定資産税等の概算）" value={p("OtherAnnual")} onChange={set("OtherAnnual")} suffix="万円/年" />
     </>
@@ -801,13 +873,15 @@ function HousingWizardSlide({ params, setParams, setSim }) {
     housingPlanPropertyType: params.housingPlanPropertyType, housingPlanCondition: params.housingPlanCondition,
     housingPlanPurchaseYear: params.housingPlanPurchaseYear, housingPlanPrice: params.housingPlanPrice,
     housingPlanDownPayment: params.housingPlanDownPayment, housingPlanRate: params.housingPlanRate,
-    housingPlanRateIncrease: params.housingPlanRateIncrease, housingPlanRepaymentMode: params.housingPlanRepaymentMode,
+    housingPlanRateIncrease: params.housingPlanRateIncrease, housingPlanRateCap: params.housingPlanRateCap,
+    housingPlanRepaymentMode: params.housingPlanRepaymentMode,
     housingPlanTermYears: params.housingPlanTermYears, housingPlanOtherAnnual: params.housingPlanOtherAnnual,
     housingPlanMoveEnabled: params.housingPlanMoveEnabled, housingPlanMoveYear: params.housingPlanMoveYear,
     housingPlanMoveSaleProceeds: params.housingPlanMoveSaleProceeds, housingPlanMovePropertyType: params.housingPlanMovePropertyType,
     housingPlanMoveCondition: params.housingPlanMoveCondition, housingPlanMovePrice: params.housingPlanMovePrice,
     housingPlanMoveDownPayment: params.housingPlanMoveDownPayment, housingPlanMoveRate: params.housingPlanMoveRate,
-    housingPlanMoveRateIncrease: params.housingPlanMoveRateIncrease, housingPlanMoveRepaymentMode: params.housingPlanMoveRepaymentMode,
+    housingPlanMoveRateIncrease: params.housingPlanMoveRateIncrease, housingPlanMoveRateCap: params.housingPlanMoveRateCap,
+    housingPlanMoveRepaymentMode: params.housingPlanMoveRepaymentMode,
     housingPlanMoveTermYears: params.housingPlanMoveTermYears, housingPlanMoveOtherAnnual: params.housingPlanMoveOtherAnnual,
   }));
   const setPlan = (patch) => setPlanState((prev) => ({ ...prev, ...patch }));
@@ -849,7 +923,7 @@ function HousingWizardSlide({ params, setParams, setSim }) {
           />
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
             <NumInput label={`頭金${housingType !== 1 ? "（戸建て購入時のみ反映）" : ""}`} value={downPayment} onChange={setDownPayment} suffix="万円" />
-            <NumInput label="会社の住宅補助" value={subsidy} onChange={setSubsidy} suffix="万円/年" />
+            <NumInput label="住宅補助" value={subsidy} onChange={setSubsidy} suffix="万円/年" />
           </div>
           {housingType === 1 && (
             <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 14, fontSize: 12.5, color: INK_SOFT }}>
@@ -871,23 +945,37 @@ function HousingWizardSlide({ params, setParams, setSim }) {
             <PropertyLoanFields plan={plan} setPlan={setPlan} prefix="housingPlan" />
           </div>
 
-          <NumInput label="会社の住宅補助" value={subsidy} onChange={setSubsidy} suffix="万円/年" />
+          <NumInput label="住宅補助" value={subsidy} onChange={setSubsidy} suffix="万円/年" />
 
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: INK, margin: "16px 0 10px" }}>
             <input type="checkbox" checked={plan.housingPlanMoveEnabled} onChange={(e) => setPlan({ housingPlanMoveEnabled: e.target.checked })} />
             住み替えを設定する
           </label>
-          {plan.housingPlanMoveEnabled && (
-            <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 14 }}>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
-                <NumInput label="住み替え年" value={plan.housingPlanMoveYear} onChange={(v) => setPlan({ housingPlanMoveYear: v })} width={90} />
-                <NumInput label="今の家の売却代金（ローン残高引き後・手入力）" value={plan.housingPlanMoveSaleProceeds} onChange={(v) => setPlan({ housingPlanMoveSaleProceeds: v })} suffix="万円" />
+          {plan.housingPlanMoveEnabled && (() => {
+            const moveIdx = YEARS.indexOf(plan.housingPlanMoveYear);
+            const oldLoanAtMove = moveIdx > 0
+              ? computeHousingPlan({ ...plan, housingPlanMoveEnabled: false }).loanBalance[moveIdx - 1]
+              : 0;
+            const suggestedProceeds = Math.max(0, (plan.housingPlanPrice || 0) - oldLoanAtMove);
+            return (
+              <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 14 }}>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
+                  <NumInput label="住み替え年" value={plan.housingPlanMoveYear} onChange={(v) => setPlan({ housingPlanMoveYear: v })} width={90} />
+                  <NumInput label="今の家の売却代金（ローン残高引き後・手入力）" value={plan.housingPlanMoveSaleProceeds} onChange={(v) => setPlan({ housingPlanMoveSaleProceeds: v })} suffix="万円" />
+                </div>
+                <div style={{ fontSize: 11, color: INK_SOFT, marginBottom: 10, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  参考値：物件価格のまま値上がり・値下がりなしと仮定した場合 約{fmt(suggestedProceeds)}万円（購入価格 − その時点のローン残高）
+                  <button onClick={() => setPlan({ housingPlanMoveSaleProceeds: Math.round(suggestedProceeds) })}
+                    style={{ fontSize: 11, padding: "3px 8px", borderRadius: 4, border: `1px solid ${GOLD}`, background: GOLD_SOFT, color: INK, cursor: "pointer" }}>
+                    この値を使う
+                  </button>
+                </div>
+                <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>新しい物件</div>
+                <PropertyLoanFields plan={plan} setPlan={setPlan} prefix="housingPlanMove" />
+                <div style={{ fontSize: 11, color: INK_SOFT, marginTop: 6 }}>売却代金は新居の頭金にそのまま充当せず、差額（新居頭金－売却代金）をその年の住宅費として加減算します。実際の売却額は市況次第で変わるため、参考値は目安として自由に書き換えてください。</div>
               </div>
-              <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>新しい物件</div>
-              <PropertyLoanFields plan={plan} setPlan={setPlan} prefix="housingPlanMove" />
-              <div style={{ fontSize: 11, color: INK_SOFT, marginTop: 6 }}>売却代金は新居の頭金にそのまま充当せず、差額（新居頭金－売却代金）をその年の住宅費として加減算します。</div>
-            </div>
-          )}
+            );
+          })()}
         </>
       )}
 
@@ -936,6 +1024,10 @@ function CarWizardSlide({ setSim }) {
         const idx = YEARS.indexOf(parseInt(bodyYear, 10));
         if (idx >= 0 && YEARS[idx] >= thisYear) next.expense.car.body[idx] = parseFloat(bodyPrice) || 0;
       }
+      const touched = new Set(next.wizardTouched || []);
+      ["car.gas", "car.insurance", "car.tax", "car.inspection", "car.other"].forEach((k) => touched.add(k));
+      if (parkingMonthly !== "") touched.add("car.parking");
+      next.wizardTouched = [...touched];
       return next;
     });
     setApplied("反映しました。「一覧」タブで確認できます。");
@@ -1000,8 +1092,8 @@ function CarWizardSlide({ setSim }) {
   );
 }
 
-function CostWizardModal({ sim, setSim, params, setParams, family, onClose }) {
-  const [step, setStep] = useState("tuition");
+function CostWizardModal({ sim, setSim, params, setParams, family, onClose, initialStep }) {
+  const [step, setStep] = useState(initialStep || "tuition");
   const steps = [
     { key: "tuition", label: "① 学費" },
     { key: "housing", label: "② 住宅" },
@@ -1051,14 +1143,15 @@ function SheetCell({ value, onChange, bold, readOnly }) {
   );
 }
 
-function SheetRow({ label, arr, onChange, bold, highlight, indent }) {
+function SheetRow({ label, arr, onChange, bold, highlight, indent, wizard }) {
+  const bg = highlight ? GOLD_SOFT : wizard ? SUMI_SOFT : CARD;
   return (
-    <div style={{ display: "flex", borderBottom: `1px solid ${PAPER_LINE}`, background: highlight ? GOLD_SOFT : CARD }}>
+    <div style={{ display: "flex", borderBottom: `1px solid ${PAPER_LINE}`, background: bg }}>
       <div style={{
         width: 128, flexShrink: 0, fontSize: 11.5, fontWeight: bold ? 700 : 400, color: INK,
         padding: "6px 8px 6px " + (indent ? "18px" : "8px"), position: "sticky", left: 0, zIndex: 2,
-        background: highlight ? GOLD_SOFT : CARD, borderRight: `1px solid ${PAPER_LINE}`, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-      }}>{label}</div>
+        background: bg, borderRight: `1px solid ${PAPER_LINE}`, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+      }}>{label}{wizard && <span title="費用ウィザードで設定" style={{ marginLeft: 4 }}>🧮</span>}</div>
       <div style={{ display: "flex" }}>
         {YEARS.map((y, i) => (
           <SheetCell key={y} value={arr[i]} onChange={onChange ? (v) => onChange(i, v) : undefined} bold={bold} readOnly={!onChange} />
@@ -1122,7 +1215,7 @@ function SheetAgeMemoRow({ member, onMemoChange }) {
 }
 
 
-function SheetTab({ sim, setSim, params, family, setFamily }) {
+function SheetTab({ sim, setSim, params, setParams, family, setFamily }) {
   const model = useMemo(() => computeModel(sim, params), [sim, params]);
   const exp = sim.expense, inc = sim.income;
 
@@ -1132,14 +1225,24 @@ function SheetTab({ sim, setSim, params, family, setFamily }) {
       let obj = next.expense;
       const keys = path.split(".");
       for (let k = 0; k < keys.length - 1; k++) obj = obj[keys[k]];
-      obj[keys[keys.length - 1]][i] = v;
+      fillForward(obj[keys[keys.length - 1]], i, v);
+      if (next.wizardTouched?.includes(path)) next.wizardTouched = next.wizardTouched.filter((p) => p !== path);
       return next;
     });
   };
   const mkInc = (key) => (i, v) => {
-    setSim((prev) => { const next = clone(prev); next.income[key][i] = v; return next; });
+    setSim((prev) => { const next = clone(prev); fillForward(next.income[key], i, v); return next; });
   };
 
+  const setRateOverride = (year, pct) => {
+    setParams((p) => {
+      const isMoveRegime = p.housingPlanMoveEnabled && year >= p.housingPlanMoveYear;
+      const key = isMoveRegime ? "housingPlanMoveRateOverrides" : "housingPlanRateOverrides";
+      return { ...p, [key]: { ...p[key], [year]: pct / 100 } };
+    });
+  };
+
+  const isWizard = (path) => (sim.wizardTouched || []).includes(path);
   const childLabel = (id, fallback) => family.find((m) => m.id === id)?.label || fallback;
   const updateMemo = (memberId, year, text) => {
     setFamily((prev) => prev.map((m) => m.id === memberId ? { ...m, memos: { ...m.memos, [year]: text } } : m));
@@ -1180,11 +1283,11 @@ function SheetTab({ sim, setSim, params, family, setFamily }) {
 
             <SheetRow label="支出合計" arr={model.expenseTotal} bold highlight />
             <SheetSectionLabel text="学費" />
-            <SheetRow label={childLabel("child1", "子1")} arr={exp.tuition.child1} onChange={mk("tuition.child1")} indent />
+            <SheetRow label={childLabel("child1", "子1")} arr={exp.tuition.child1} onChange={mk("tuition.child1")} indent wizard={isWizard("tuition.child1")} />
             <SheetRow label="（習い事等）" arr={exp.tuition.child1_extra} onChange={mk("tuition.child1_extra")} indent />
-            <SheetRow label={childLabel("child2", "子2")} arr={exp.tuition.child2} onChange={mk("tuition.child2")} indent />
+            <SheetRow label={childLabel("child2", "子2")} arr={exp.tuition.child2} onChange={mk("tuition.child2")} indent wizard={isWizard("tuition.child2")} />
             <SheetRow label="（習い事等）" arr={exp.tuition.child2_extra} onChange={mk("tuition.child2_extra")} indent />
-            <SheetRow label={childLabel("child3", "子3")} arr={exp.tuition.child3} onChange={mk("tuition.child3")} indent />
+            <SheetRow label={childLabel("child3", "子3")} arr={exp.tuition.child3} onChange={mk("tuition.child3")} indent wizard={isWizard("tuition.child3")} />
             <SheetRow label="（習い事等）" arr={exp.tuition.child3_extra} onChange={mk("tuition.child3_extra")} indent />
             <SheetRow label="子供下宿" arr={exp.dorm} onChange={mk("dorm")} indent />
 
@@ -1201,6 +1304,8 @@ function SheetTab({ sim, setSim, params, family, setFamily }) {
                 <SheetRow label="住宅費（返済額＋その他）" arr={model.housingCost} indent />
                 <SheetRow label="ローン残高" arr={model.loanBalance} indent />
                 <SheetRow label="住宅資産（残存評価）" arr={model.realEstateAsset} indent />
+                <SheetRow label="ローン金利（年率%）" arr={model.housingRate.map((r) => Math.round(r * 10000) / 100)}
+                  onChange={(i, v) => setRateOverride(YEARS[i], v)} indent />
               </>
             ) : params.housingType === 1 ? (
               <>
@@ -1220,13 +1325,13 @@ function SheetTab({ sim, setSim, params, family, setFamily }) {
             )}
 
             <SheetSectionLabel text="車" />
-            <SheetRow label="本体" arr={exp.car.body} onChange={mk("car.body")} indent />
-            <SheetRow label="駐車場" arr={exp.car.parking} onChange={mk("car.parking")} indent />
-            <SheetRow label="ガス代" arr={exp.car.gas} onChange={mk("car.gas")} indent />
-            <SheetRow label="保険" arr={exp.car.insurance} onChange={mk("car.insurance")} indent />
-            <SheetRow label="税金" arr={exp.car.tax} onChange={mk("car.tax")} indent />
-            <SheetRow label="車検" arr={exp.car.inspection} onChange={mk("car.inspection")} indent />
-            <SheetRow label="他経費" arr={exp.car.other} onChange={mk("car.other")} indent />
+            <SheetRow label="本体" arr={exp.car.body} onChange={mk("car.body")} indent wizard={isWizard("car.body")} />
+            <SheetRow label="駐車場" arr={exp.car.parking} onChange={mk("car.parking")} indent wizard={isWizard("car.parking")} />
+            <SheetRow label="ガス代" arr={exp.car.gas} onChange={mk("car.gas")} indent wizard={isWizard("car.gas")} />
+            <SheetRow label="保険" arr={exp.car.insurance} onChange={mk("car.insurance")} indent wizard={isWizard("car.insurance")} />
+            <SheetRow label="税金" arr={exp.car.tax} onChange={mk("car.tax")} indent wizard={isWizard("car.tax")} />
+            <SheetRow label="車検" arr={exp.car.inspection} onChange={mk("car.inspection")} indent wizard={isWizard("car.inspection")} />
+            <SheetRow label="他経費" arr={exp.car.other} onChange={mk("car.other")} indent wizard={isWizard("car.other")} />
 
             <SheetSectionLabel text="他生活費" />
             <SheetRow label={`食費：${childLabel("father", "父")}`} arr={exp.living.food_father} onChange={mk("living.food_father")} indent />
@@ -1262,14 +1367,14 @@ function SheetTab({ sim, setSim, params, family, setFamily }) {
           </div>
         </div>
         <div style={{ fontSize: 10.5, color: INK_SOFT, marginTop: 8 }}>
-          金色でハイライトした行は自動計算される合計・小計です。白い行は数値を直接編集できます（単位：万円）。
+          金色でハイライトした行は自動計算される合計・小計です。白い行は数値を直接編集できます（単位：万円）。1つの年に入力すると、それ以降の年も自動的に同じ金額になります。緑色の背景は費用ウィザードで設定した項目です。
         </div>
       </div>
     </div>
   );
 }
 
-function SimulationTab({ sim, setSim, params, setParams }) {
+function SimulationTab({ sim, setSim, params, setParams, onOpenWizard }) {
   const model = useMemo(() => computeModel(sim, params), [sim, params]);
 
   const mk = (path) => (i, v) => {
@@ -1278,13 +1383,15 @@ function SimulationTab({ sim, setSim, params, setParams }) {
       let obj = next.expense;
       const keys = path.split(".");
       for (let k = 0; k < keys.length - 1; k++) obj = obj[keys[k]];
-      obj[keys[keys.length - 1]][i] = v;
+      fillForward(obj[keys[keys.length - 1]], i, v);
+      if (next.wizardTouched?.includes(path)) next.wizardTouched = next.wizardTouched.filter((p) => p !== path);
       return next;
     });
   };
   const mkInc = (key) => (i, v) => {
-    setSim((prev) => { const next = clone(prev); next.income[key][i] = v; return next; });
+    setSim((prev) => { const next = clone(prev); fillForward(next.income[key], i, v); return next; });
   };
+  const isWizard = (path) => (sim.wizardTouched || []).includes(path);
 
   const chartData = YEARS.map((y, i) => ({
     year: y,
@@ -1385,15 +1492,15 @@ function SimulationTab({ sim, setSim, params, setParams }) {
         </div>
       </div>
 
-      <SectionHeader title="支出の内訳を編集" sub="カテゴリをタップすると年ごとの金額（万円）を編集できます" />
+      <SectionHeader title="支出の内訳を編集" sub="カテゴリをタップすると年ごとの金額（万円）を編集できます。1年に入力すると、それ以降も同じ金額が自動で続きます" />
       <div style={{ padding: "0 16px" }}>
-        <Accordion title="学費" colorKey="tuition">
+        <Accordion title="学費" colorKey="tuition" onWizard={() => onOpenWizard("tuition")} wizardLabel="学費ウィザード">
           <EditTable rows={[
-            { label: "子供1", arr: sim.expense.tuition.child1, onChange: mk("tuition.child1") },
+            { label: "子供1", arr: sim.expense.tuition.child1, onChange: mk("tuition.child1"), wizard: isWizard("tuition.child1") },
             { label: "（習い事等）", arr: sim.expense.tuition.child1_extra, onChange: mk("tuition.child1_extra"), indent: true },
-            { label: "子供2", arr: sim.expense.tuition.child2, onChange: mk("tuition.child2") },
+            { label: "子供2", arr: sim.expense.tuition.child2, onChange: mk("tuition.child2"), wizard: isWizard("tuition.child2") },
             { label: "（習い事等）", arr: sim.expense.tuition.child2_extra, onChange: mk("tuition.child2_extra"), indent: true },
-            { label: "子供3", arr: sim.expense.tuition.child3, onChange: mk("tuition.child3") },
+            { label: "子供3", arr: sim.expense.tuition.child3, onChange: mk("tuition.child3"), wizard: isWizard("tuition.child3") },
             { label: "（習い事等）", arr: sim.expense.tuition.child3_extra, onChange: mk("tuition.child3_extra"), indent: true },
             { label: "子供下宿", arr: sim.expense.dorm, onChange: mk("dorm") },
           ]} />
@@ -1407,8 +1514,12 @@ function SimulationTab({ sim, setSim, params, setParams }) {
             { label: "母方祖母", arr: sim.expense.medical.gmother_m, onChange: mk("medical.gmother_m") },
           ]} />
         </Accordion>
-        <Accordion title={`住宅（${HOUSING_LABELS[params.housingType]}）`} colorKey="housing">
-          {params.housingType === 1 ? (
+        <Accordion title={params.housingPlanEnabled ? "住宅（ローン試算）" : `住宅（${HOUSING_LABELS[params.housingType]}）`} colorKey="housing" onWizard={() => onOpenWizard("housing")} wizardLabel="住宅ウィザード">
+          {params.housingPlanEnabled ? (
+            <div style={{ fontSize: 11.5, color: INK_SOFT }}>
+              住宅ローン試算プランが有効です。返済額・ローン残高・金利は「住宅ウィザード」または「一覧」タブで確認・編集できます。
+            </div>
+          ) : params.housingType === 1 ? (
             <>
               <EditTable rows={[
                 { label: "ローン支払", arr: sim.expense.housing_opt1_loanPayment, onChange: mk("housing_opt1_loanPayment") },
@@ -1429,15 +1540,15 @@ function SimulationTab({ sim, setSim, params, setParams }) {
             <EditTable rows={[{ label: "賃貸→分譲費用", arr: sim.expense.housing_opt4_rent_to_condo, onChange: mk("housing_opt4_rent_to_condo") }]} />
           )}
         </Accordion>
-        <Accordion title="車" colorKey="car">
+        <Accordion title="車" colorKey="car" onWizard={() => onOpenWizard("car")} wizardLabel="車ウィザード">
           <EditTable rows={[
-            { label: "本体", arr: sim.expense.car.body, onChange: mk("car.body") },
-            { label: "駐車場", arr: sim.expense.car.parking, onChange: mk("car.parking") },
-            { label: "ガス代", arr: sim.expense.car.gas, onChange: mk("car.gas") },
-            { label: "保険", arr: sim.expense.car.insurance, onChange: mk("car.insurance") },
-            { label: "税金", arr: sim.expense.car.tax, onChange: mk("car.tax") },
-            { label: "車検", arr: sim.expense.car.inspection, onChange: mk("car.inspection") },
-            { label: "他経費", arr: sim.expense.car.other, onChange: mk("car.other") },
+            { label: "本体", arr: sim.expense.car.body, onChange: mk("car.body"), wizard: isWizard("car.body") },
+            { label: "駐車場", arr: sim.expense.car.parking, onChange: mk("car.parking"), wizard: isWizard("car.parking") },
+            { label: "ガス代", arr: sim.expense.car.gas, onChange: mk("car.gas"), wizard: isWizard("car.gas") },
+            { label: "保険", arr: sim.expense.car.insurance, onChange: mk("car.insurance"), wizard: isWizard("car.insurance") },
+            { label: "税金", arr: sim.expense.car.tax, onChange: mk("car.tax"), wizard: isWizard("car.tax") },
+            { label: "車検", arr: sim.expense.car.inspection, onChange: mk("car.inspection"), wizard: isWizard("car.inspection") },
+            { label: "他経費", arr: sim.expense.car.other, onChange: mk("car.other"), wizard: isWizard("car.other") },
           ]} />
         </Accordion>
         <Accordion title="他生活費" colorKey="living">
@@ -2325,6 +2436,8 @@ export default function App() {
   const [family, setFamily] = useState(defaultFamilyState);
   const [showFamilyModal, setShowFamilyModal] = useState(false);
   const [showCostWizard, setShowCostWizard] = useState(false);
+  const [costWizardStep, setCostWizardStep] = useState("tuition");
+  const openCostWizard = (step) => { setCostWizardStep(step); setShowCostWizard(true); };
   const saveTimer = useRef(null);
 
   useEffect(() => {
@@ -2332,7 +2445,7 @@ export default function App() {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (parsed.sim) setSim(parsed.sim);
+        if (parsed.sim) setSim({ wizardTouched: [], ...parsed.sim });
         if (parsed.params) setParams({ ...defaultParamsState(), ...parsed.params });
         if (parsed.holdings) setHoldings(parsed.holdings);
         if (parsed.cashList) setCashList(parsed.cashList);
@@ -2388,7 +2501,7 @@ export default function App() {
       try {
         const parsed = JSON.parse(ev.target.result);
         if (!window.confirm("このファイルの内容で、今の編集内容を上書きします。よろしいですか？")) return;
-        if (parsed.sim) setSim(parsed.sim);
+        if (parsed.sim) setSim({ wizardTouched: [], ...parsed.sim });
         if (parsed.params) setParams({ ...defaultParamsState(), ...parsed.params });
         if (parsed.holdings) setHoldings(parsed.holdings);
         if (parsed.cashList) setCashList(parsed.cashList);
@@ -2437,7 +2550,8 @@ export default function App() {
       </div>
       {showFamilyModal && <FamilySetupModal family={family} setFamily={setFamily} onClose={() => setShowFamilyModal(false)} />}
       {showCostWizard && (
-        <CostWizardModal sim={sim} setSim={setSim} params={params} setParams={setParams} family={family} onClose={() => setShowCostWizard(false)} />
+        <CostWizardModal sim={sim} setSim={setSim} params={params} setParams={setParams} family={family}
+          onClose={() => setShowCostWizard(false)} initialStep={costWizardStep} />
       )}
       {saveNote && (
         <div style={{ position: "fixed", top: 8, right: 8, background: SUMI, color: "#fff", fontSize: 11, padding: "4px 10px", borderRadius: 12, zIndex: 100 }}>
@@ -2456,8 +2570,8 @@ export default function App() {
         onChange={setTab}
       />
 
-      {tab === "sim" && <SimulationTab sim={sim} setSim={setSim} params={params} setParams={setParams} />}
-      {tab === "sheet" && <SheetTab sim={sim} setSim={setSim} params={params} family={family} setFamily={setFamily} />}
+      {tab === "sim" && <SimulationTab sim={sim} setSim={setSim} params={params} setParams={setParams} onOpenWizard={openCostWizard} />}
+      {tab === "sheet" && <SheetTab sim={sim} setSim={setSim} params={params} setParams={setParams} family={family} setFamily={setFamily} />}
       {tab === "portfolio" && <PortfolioTab holdings={holdings} setHoldings={setHoldings} cashList={cashList} setCashList={setCashList} params={params} setParams={setParams} asOfDate={asOfDate} setAsOfDate={setAsOfDate} />}
       {tab === "aggregate" && <AggregationTab holdings={holdings} cashList={cashList} sim={sim} params={params} asOfDate={asOfDate} yearSnapshots={yearSnapshots} setYearSnapshots={setYearSnapshots} />}
     </div>
