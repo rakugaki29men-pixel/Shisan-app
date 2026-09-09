@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   AreaChart, Area, LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine, ReferenceDot
 } from "recharts";
 
 /* ============================================================
@@ -1637,8 +1637,102 @@ function StartYearControl({ sim, setSim, params, setParams }) {
   );
 }
 
+const settingsBtnStyle = {
+  fontSize: 11.5, padding: "7px 11px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`,
+  background: CARD, color: INK, cursor: "pointer", whiteSpace: "nowrap",
+};
+
+function SettingsSection({ title, children }) {
+  return (
+    <div>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: INK, borderLeft: `4px solid ${GOLD}`, paddingLeft: 8, marginBottom: 8 }}>{title}</div>
+      {children}
+    </div>
+  );
+}
+
+function SettingsModal({ sim, setSim, params, setParams, onOpenFamily, onOpenWizard, onExport, onImport, onReset, onClose }) {
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: PAPER, zIndex: 200, overflowY: "auto",
+      fontFamily: "'Noto Sans JP','Hiragino Sans',sans-serif",
+    }}>
+      <div style={{ background: INK, color: PAPER, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, zIndex: 5 }}>
+        <div style={{ fontFamily: "'Shippori Mincho','Noto Serif JP',serif", fontSize: 17 }}>⚙ 設定</div>
+        <button onClick={onClose} style={{ background: "transparent", border: "1px solid #4A5A75", color: PAPER, borderRadius: 4, padding: "5px 10px", fontSize: 12, cursor: "pointer" }}>閉じる ×</button>
+      </div>
+
+      <div style={{ padding: "14px 16px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
+        <SettingsSection title="家族・費用の入力">
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={onOpenFamily} style={settingsBtnStyle}>👪 家族構成を編集</button>
+            <button onClick={onOpenWizard} style={settingsBtnStyle}>🧮 費用自動試算ウィザード</button>
+          </div>
+        </SettingsSection>
+
+        <SettingsSection title="シミュレーション期間">
+          <StartYearControl sim={sim} setSim={setSim} params={params} setParams={setParams} />
+        </SettingsSection>
+
+        <SettingsSection title="住居プラン">
+          <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 12 }}>
+            {params.housingPlanEnabled && (
+              <div style={{ fontSize: 11.5, color: SUMI, background: SUMI_SOFT, borderRadius: 4, padding: "6px 8px", marginBottom: 8 }}>
+                🧮 費用ウィザードのローン試算プランが有効なため、以下の選択は使われていません。変更するには「費用自動試算ウィザード」の「住宅」を開いてください。
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", opacity: params.housingPlanEnabled ? 0.4 : 1, pointerEvents: params.housingPlanEnabled ? "none" : "auto" }}>
+              {[1, 2, 3, 4].map((v) => (
+                <button key={v} onClick={() => setParams((p) => ({ ...p, housingType: v }))}
+                  style={{
+                    padding: "6px 10px", fontSize: 12, borderRadius: 4, cursor: "pointer",
+                    border: `1px solid ${params.housingType === v ? GOLD : PAPER_LINE}`,
+                    background: params.housingType === v ? GOLD_SOFT : "#fff", color: INK,
+                  }}>{HOUSING_LABELS[v]}</button>
+              ))}
+            </div>
+          </div>
+        </SettingsSection>
+
+        <SettingsSection title="グローバル設定">
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <ParamField label="金融資産 年間成長率" value={(params.growthRate - 1) * 100} suffix="%"
+                onChange={(v) => setParams((p) => ({ ...p, growthRate: 1 + v / 100 }))} />
+              <ParamField label="配当利回り" value={params.dividendRate * 100} suffix="%"
+                onChange={(v) => setParams((p) => ({ ...p, dividendRate: v / 100 }))} />
+              <ParamField label="住宅ローン金利" value={params.loanRate * 100} suffix="%"
+                onChange={(v) => setParams((p) => ({ ...p, loanRate: v / 100 }))}
+                disabled={params.housingPlanEnabled}
+                note={params.housingPlanEnabled ? "住宅ウィザードの金利を使用中" : undefined} />
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <ParamField label={`初期金融資産(${YEARS[0]})`} value={params.securities0} suffix="万円"
+                onChange={(v) => setParams((p) => ({ ...p, securities0: v }))} />
+              <ParamField label={`初期現金(${YEARS[0]})`} value={params.cash0} suffix="万円"
+                onChange={(v) => setParams((p) => ({ ...p, cash0: v }))} />
+            </div>
+          </div>
+        </SettingsSection>
+
+        <SettingsSection title="データの管理">
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={onExport} style={settingsBtnStyle}>⬇ エクスポート</button>
+            <button onClick={onImport} style={settingsBtnStyle}>⬆ インポート</button>
+            <button onClick={onReset} style={{ ...settingsBtnStyle, color: SEAL, border: `1px solid ${SEAL}` }}>初期データにリセット</button>
+          </div>
+          <div style={{ fontSize: 10.5, color: INK_SOFT, marginTop: 6 }}>
+            「初期データにリセット」は、これまでの入力内容をすべて消して、アプリ最初のサンプルデータに戻します（元に戻せません。必要なら先にエクスポートで保存してください）。
+          </div>
+        </SettingsSection>
+      </div>
+    </div>
+  );
+}
+
 function SimulationTab({ sim, setSim, params, setParams, onOpenWizard, onOpenSheet }) {
   const model = useMemo(() => computeModel(sim, params), [sim, params]);
+  const [activeMarker, setActiveMarker] = useState(null);
 
   const mk = (path) => (i, v) => {
     setSim((prev) => {
@@ -1669,20 +1763,20 @@ function SimulationTab({ sim, setSim, params, setParams, onOpenWizard, onOpenShe
     総資産: Math.round(model.assetTotal[i]),
   }));
 
-  const lastAsset = model.assetTotal[N - 1];
   const peakAsset = Math.max(...model.assetTotal);
   const peakYear = YEARS[model.assetTotal.indexOf(peakAsset)];
   const negativeIdx = model.assetTotal.findIndex((v) => v < 0);
 
+  const markerIcon = (emoji, key) => (props) => (
+    <g style={{ cursor: "pointer" }} onClick={() => setActiveMarker((m) => (m === key ? null : key))}>
+      <circle cx={props.cx} cy={props.cy} r={13} fill="#fff" stroke={PAPER_LINE} />
+      <text x={props.cx} y={props.cy + 5} textAnchor="middle" fontSize={14}>{emoji}</text>
+    </g>
+  );
+
   return (
     <div style={{ paddingBottom: 40 }}>
       <SectionHeader title="資産推移シミュレーション" />
-
-      <div style={{ display: "flex", gap: 8, padding: "0 16px 14px", flexWrap: "wrap" }}>
-        <StatCard label={`${YEARS[N - 1]}年の総資産`} value={fmtMan(lastAsset)} tone={lastAsset >= 0 ? "sumi" : "seal"} />
-        <StatCard label="資産のピーク" value={`${peakYear}年 ${fmtMan(peakAsset)}`} tone="gold" />
-        <StatCard label="資産が尽きる年" value={negativeIdx >= 0 ? `${YEARS[negativeIdx]}年` : "なし"} tone={negativeIdx >= 0 ? "seal" : "sumi"} />
-      </div>
 
       <div style={{ padding: "0 16px", height: 250, background: CARD, marginBottom: 4 }}>
         <ResponsiveContainer width="100%" height="100%">
@@ -1696,9 +1790,23 @@ function SimulationTab({ sim, setSim, params, setParams, onOpenWizard, onOpenShe
             <Area type="monotone" dataKey="現金" stackId="a" stroke={"#8FA6C7"} fill={"#8FA6C7"} fillOpacity={0.55} />
             <Area type="monotone" dataKey="不動産" stackId="a" stroke={SUMI} fill={SUMI} fillOpacity={0.4} />
             <Legend wrapperStyle={{ fontSize: 11 }} />
+            <ReferenceDot x={peakYear} y={peakAsset} r={13} isFront shape={markerIcon("⭐", "peak")} />
+            {negativeIdx >= 0 && (
+              <ReferenceDot x={YEARS[negativeIdx]} y={model.assetTotal[negativeIdx]} r={13} isFront shape={markerIcon("❌", "depletion")} />
+            )}
           </AreaChart>
         </ResponsiveContainer>
       </div>
+      {activeMarker === "peak" && (
+        <div style={{ margin: "0 16px 10px", padding: "8px 10px", fontSize: 12, background: GOLD_SOFT, border: `1px solid ${GOLD}`, borderRadius: 4, color: INK }}>
+          ⭐ 資産のピーク：{peakYear}年に総資産 {fmtMan(peakAsset)}
+        </div>
+      )}
+      {activeMarker === "depletion" && (
+        <div style={{ margin: "0 16px 10px", padding: "8px 10px", fontSize: 12, background: SEAL_SOFT, border: `1px solid ${SEAL}`, borderRadius: 4, color: INK }}>
+          ❌ 資金ショート：{YEARS[negativeIdx]}年に総資産がマイナス（{fmtMan(model.assetTotal[negativeIdx])}）になります
+        </div>
+      )}
       <div style={{ padding: "4px 16px 0" }}>
         <RealEstateToggle params={params} setParams={setParams} />
       </div>
@@ -1715,45 +1823,6 @@ function SimulationTab({ sim, setSim, params, setParams, onOpenWizard, onOpenShe
             <Legend wrapperStyle={{ fontSize: 11 }} />
           </BarChart>
         </ResponsiveContainer>
-      </div>
-
-      <SectionHeader title="前提条件（グローバル設定）" />
-      <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-        <StartYearControl sim={sim} setSim={setSim} params={params} setParams={setParams} />
-        <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 12 }}>
-          <div style={{ fontSize: 12.5, color: INK_SOFT, marginBottom: 6 }}>住居プラン</div>
-          {params.housingPlanEnabled && (
-            <div style={{ fontSize: 11.5, color: SUMI, background: SUMI_SOFT, borderRadius: 4, padding: "6px 8px", marginBottom: 8 }}>
-              🧮 費用ウィザードのローン試算プランが有効なため、以下の選択は使われていません。変更するにはウィザードの「住宅」を開いてください。
-            </div>
-          )}
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", opacity: params.housingPlanEnabled ? 0.4 : 1, pointerEvents: params.housingPlanEnabled ? "none" : "auto" }}>
-            {[1, 2, 3, 4].map((v) => (
-              <button key={v} onClick={() => setParams((p) => ({ ...p, housingType: v }))}
-                style={{
-                  padding: "6px 10px", fontSize: 12, borderRadius: 4, cursor: "pointer",
-                  border: `1px solid ${params.housingType === v ? GOLD : PAPER_LINE}`,
-                  background: params.housingType === v ? GOLD_SOFT : "#fff", color: INK,
-                }}>{HOUSING_LABELS[v]}</button>
-            ))}
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <ParamField label="金融資産 年間成長率" value={(params.growthRate - 1) * 100} suffix="%"
-            onChange={(v) => setParams((p) => ({ ...p, growthRate: 1 + v / 100 }))} />
-          <ParamField label="配当利回り" value={params.dividendRate * 100} suffix="%"
-            onChange={(v) => setParams((p) => ({ ...p, dividendRate: v / 100 }))} />
-          <ParamField label="住宅ローン金利" value={params.loanRate * 100} suffix="%"
-            onChange={(v) => setParams((p) => ({ ...p, loanRate: v / 100 }))}
-            disabled={params.housingPlanEnabled}
-            note={params.housingPlanEnabled ? "住宅ウィザードの金利を使用中" : undefined} />
-        </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <ParamField label={`初期金融資産(${YEARS[0]})`} value={params.securities0} suffix="万円"
-            onChange={(v) => setParams((p) => ({ ...p, securities0: v }))} />
-          <ParamField label={`初期現金(${YEARS[0]})`} value={params.cash0} suffix="万円"
-            onChange={(v) => setParams((p) => ({ ...p, cash0: v }))} />
-        </div>
       </div>
 
       <SectionHeader title="支出の内訳を編集" sub="カテゴリをタップすると年ごとの金額（万円）を編集できます。1年に入力すると、それ以降も同じ金額が自動で続きます"
@@ -2667,6 +2736,7 @@ export default function App() {
   const [showFamilyModal, setShowFamilyModal] = useState(false);
   const [showCostWizard, setShowCostWizard] = useState(false);
   const [showSheet, setShowSheet] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [costWizardStep, setCostWizardStep] = useState("tuition");
   const openCostWizard = (step) => { setCostWizardStep(step); setShowCostWizard(true); };
   const saveTimer = useRef(null);
@@ -2755,30 +2825,19 @@ export default function App() {
           <div style={{ fontFamily: "'Shippori Mincho','Noto Serif JP',serif", fontSize: 18, letterSpacing: "0.06em" }}>家計シミュレーション帳</div>
           <div style={{ fontSize: 10.5, color: "#AEB9CC", marginTop: 2 }}>{YEARS[0]}–{YEARS[N - 1]} 年 資産・収支プラン</div>
         </div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", maxWidth: "60%" }}>
-          <button onClick={() => setShowFamilyModal(true)} style={{
-            fontSize: 10.5, color: "#D8C089", background: "transparent", border: "1px solid #4A5A75",
-            borderRadius: 4, padding: "5px 8px", cursor: "pointer", whiteSpace: "nowrap",
-          }}>👪 家族構成</button>
-          <button onClick={() => setShowCostWizard(true)} style={{
-            fontSize: 10.5, color: "#D8C089", background: "transparent", border: "1px solid #4A5A75",
-            borderRadius: 4, padding: "5px 8px", cursor: "pointer", whiteSpace: "nowrap",
-          }}>🧮 費用ウィザード</button>
-          <button onClick={exportData} style={{
-            fontSize: 10.5, color: "#D8C089", background: "transparent", border: "1px solid #4A5A75",
-            borderRadius: 4, padding: "5px 8px", cursor: "pointer", whiteSpace: "nowrap",
-          }}>⬇ エクスポート</button>
-          <button onClick={triggerImport} style={{
-            fontSize: 10.5, color: "#D8C089", background: "transparent", border: "1px solid #4A5A75",
-            borderRadius: 4, padding: "5px 8px", cursor: "pointer", whiteSpace: "nowrap",
-          }}>⬆ インポート</button>
-          <input ref={fileInputRef} type="file" accept="application/json" onChange={handleImportFile} style={{ display: "none" }} />
-          <button onClick={resetAll} style={{
-            fontSize: 10.5, color: "#D8C089", background: "transparent", border: "1px solid #4A5A75",
-            borderRadius: 4, padding: "5px 8px", cursor: "pointer", whiteSpace: "nowrap",
-          }}>元データに戻す</button>
-        </div>
+        <button onClick={() => setShowSettings(true)} aria-label="設定" style={{
+          fontSize: 18, color: "#D8C089", background: "transparent", border: "1px solid #4A5A75",
+          borderRadius: 4, padding: "5px 9px", cursor: "pointer", lineHeight: 1,
+        }}>⚙</button>
       </div>
+      <input ref={fileInputRef} type="file" accept="application/json" onChange={handleImportFile} style={{ display: "none" }} />
+      {showSettings && (
+        <SettingsModal sim={sim} setSim={setSim} params={params} setParams={setParams}
+          onOpenFamily={() => { setShowSettings(false); setShowFamilyModal(true); }}
+          onOpenWizard={() => { setShowSettings(false); setShowCostWizard(true); }}
+          onExport={exportData} onImport={triggerImport} onReset={resetAll}
+          onClose={() => setShowSettings(false)} />
+      )}
       {showFamilyModal && <FamilySetupModal family={family} setFamily={setFamily} onClose={() => setShowFamilyModal(false)} />}
       {showCostWizard && (
         <CostWizardModal sim={sim} setSim={setSim} params={params} setParams={setParams} family={family}
