@@ -624,15 +624,16 @@ function RealEstateToggle({ params, setParams }) {
   );
 }
 
-function StatCard({ label, value, tone = "ink", small }) {
+function StatCard({ label, value, tone = "ink", small, corner }) {
   const color = tone === "seal" ? SEAL : tone === "sumi" ? SUMI : tone === "gold" ? GOLD : INK;
   return (
     <div style={{
       background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 4, padding: "12px 14px",
-      flex: 1, minWidth: 0,
+      flex: 1, minWidth: 0, position: "relative",
     }}>
       <div style={{ fontSize: 11, color: INK_SOFT, marginBottom: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
       <div style={{ fontSize: small ? 14 : 16, fontWeight: 700, color, fontVariantNumeric: "tabular-nums", lineHeight: 1.25, wordBreak: "break-word" }}>{value}</div>
+      {corner && <div style={{ position: "absolute", right: 8, bottom: 6, fontSize: 9.5, color: INK_SOFT }}>{corner}</div>}
     </div>
   );
 }
@@ -2553,7 +2554,7 @@ function BuyMoreForm({ h, onApply, onCancel, fxRate }) {
   );
 }
 
-function HoldingCard({ h, onUpdate, onDelete, fxRate }) {
+function HoldingCard({ h, onUpdate, onDelete, fxRate, fmtCur = fmtYen }) {
   const [expanded, setExpanded] = useState(false);
   const [buyMoreOpen, setBuyMoreOpen] = useState(false);
   const pl = (h.valueJpy || 0) - (h.avgJpyTotal || 0);
@@ -2578,8 +2579,8 @@ function HoldingCard({ h, onUpdate, onDelete, fxRate }) {
         </div>
         <div style={{ display: "flex", alignItems: "flex-start", gap: 6, flexShrink: 0 }}>
           <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: 11.5, fontWeight: 700, color: INK, fontVariantNumeric: "tabular-nums" }}>{fmtYen(h.valueJpy)}</div>
-            <div style={{ fontSize: 10.5, fontWeight: 600, color: pl >= 0 ? SUMI : SEAL, fontVariantNumeric: "tabular-nums" }}>{(pl >= 0 ? "+" : "") + fmtYen(pl)}</div>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: INK, fontVariantNumeric: "tabular-nums" }}>{fmtCur(h.valueJpy)}</div>
+            <div style={{ fontSize: 10.5, fontWeight: 600, color: pl >= 0 ? SUMI : SEAL, fontVariantNumeric: "tabular-nums" }}>{(pl >= 0 ? "+" : "") + fmtCur(pl)}</div>
           </div>
           <span style={{ color: INK_SOFT, fontSize: 11, marginTop: 2 }}>{expanded ? "▲" : "▼"}</span>
         </div>
@@ -2650,11 +2651,99 @@ function HoldingCard({ h, onUpdate, onDelete, fxRate }) {
   );
 }
 
+function holdingMatchesFilter(h, filter) {
+  const active = [];
+  if (filter.assetCat.length) active.push(filter.assetCat.includes(h.assetCat || "その他"));
+  if (filter.subClass.length) active.push(filter.subClass.includes(h.subClass || ""));
+  if (filter.tags.length) active.push((h.tags || []).some((t) => filter.tags.includes(t)));
+  if (active.length === 0) return true;
+  return filter.mode === "AND" ? active.every(Boolean) : active.some(Boolean);
+}
+
+function PortfolioFilterModal({ filter, setFilter, availAssetCats, availSubClasses, availTags, matchedCount, totalCount, onClose }) {
+  const toggle = (key, value) => setFilter((f) => ({
+    ...f, [key]: f[key].includes(value) ? f[key].filter((v) => v !== value) : [...f[key], value],
+  }));
+  const smallBtnStyle = { fontSize: 10.5, padding: "2px 7px", borderRadius: 3, border: `1px solid ${PAPER_LINE}`, background: "#fff", color: INK_SOFT, cursor: "pointer" };
+
+  const Slicer = ({ title, keyName, options }) => (
+    <div style={{ marginBottom: 18 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: INK }}>{title}</div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={() => setFilter((f) => ({ ...f, [keyName]: options }))} style={smallBtnStyle}>全選択</button>
+          <button onClick={() => setFilter((f) => ({ ...f, [keyName]: [] }))} style={smallBtnStyle}>全解除</button>
+        </div>
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        {options.length === 0 && <div style={{ fontSize: 11, color: INK_SOFT }}>該当なし</div>}
+        {options.map((o) => (
+          <button key={o} onClick={() => toggle(keyName, o)} style={{
+            fontSize: 11.5, padding: "5px 10px", borderRadius: 12, cursor: "pointer",
+            border: `1px solid ${filter[keyName].includes(o) ? GOLD : PAPER_LINE}`,
+            background: filter[keyName].includes(o) ? GOLD_SOFT : "#fff", color: INK,
+          }}>{o}</button>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: PAPER, zIndex: 200, overflowY: "auto", fontFamily: "'Noto Sans JP','Hiragino Sans',sans-serif" }}>
+      <div style={{ background: INK, color: PAPER, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, zIndex: 5 }}>
+        <div style={{ fontFamily: "'Shippori Mincho','Noto Serif JP',serif", fontSize: 17 }}>🔍 フィルター</div>
+        <button onClick={onClose} style={{ background: "transparent", border: "1px solid #4A5A75", color: PAPER, borderRadius: 4, padding: "5px 10px", fontSize: 12, cursor: "pointer" }}>閉じる ×</button>
+      </div>
+      <div style={{ padding: "14px 16px 40px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18, background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 10, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 12, color: INK_SOFT }}>資産クラス・サブクラス・タグの条件間</div>
+          <div style={{ display: "flex", borderRadius: 4, overflow: "hidden", border: `1px solid ${PAPER_LINE}` }}>
+            {["AND", "OR"].map((m) => (
+              <button key={m} onClick={() => setFilter((f) => ({ ...f, mode: m }))} style={{
+                fontSize: 12, padding: "5px 14px", border: "none", cursor: "pointer",
+                background: filter.mode === m ? GOLD : "#fff", color: filter.mode === m ? "#fff" : INK,
+              }}>{m}</button>
+            ))}
+          </div>
+        </div>
+        <Slicer title="資産クラス" keyName="assetCat" options={availAssetCats} />
+        <Slicer title="サブクラス" keyName="subClass" options={availSubClasses} />
+        <Slicer title="タグ" keyName="tags" options={availTags} />
+        <div style={{ fontSize: 12, color: INK, fontWeight: 600, marginBottom: 4 }}>
+          {matchedCount} / {totalCount} 件が該当
+        </div>
+        <div style={{ fontSize: 10.5, color: INK_SOFT, marginBottom: 14 }}>
+          各項目内は複数選択でOR（いずれか一致）、項目間は上で選んだ{filter.mode === "AND" ? "AND（すべて一致）" : "OR（いずれか一致）"}で絞り込みます。
+        </div>
+        <button onClick={() => setFilter({ assetCat: [], subClass: [], tags: [], mode: "AND" })} style={{
+          fontSize: 11.5, padding: "6px 12px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`, background: "#FFFDF9", color: INK_SOFT, cursor: "pointer",
+        }}>フィルターをリセット</button>
+      </div>
+    </div>
+  );
+}
+
 function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, setParams, asOfDate, setAsOfDate }) {
   const totalCash = cashList.reduce((s, c) => s + (c.amount || 0), 0);
   const totalValue = holdings.reduce((s, h) => s + (h.valueJpy || 0), 0) + totalCash;
   const totalCost = holdings.reduce((s, h) => s + (h.avgJpyTotal || 0), 0);
   const totalPl = holdings.reduce((s, h) => s + ((h.valueJpy || 0) - (h.avgJpyTotal || 0)), 0);
+
+  const [displayCurrency, setDisplayCurrency] = useState("JPY");
+  const fmtCur = (jpy) => displayCurrency === "USD" ? "$" + fmt((jpy || 0) / (params.fxRate || 150), 2) : fmtYen(jpy);
+
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filter, setFilter] = useState({ assetCat: [], subClass: [], tags: [], mode: "AND" });
+  const isFiltering = filter.assetCat.length > 0 || filter.subClass.length > 0 || filter.tags.length > 0;
+  const availAssetCats = [...new Set(holdings.map((h) => h.assetCat || "その他"))];
+  const availSubClasses = [...new Set(holdings.map((h) => h.subClass).filter(Boolean))];
+  const availTags = [...new Set(holdings.flatMap((h) => h.tags || []))];
+  const matchedIdxs = new Set(holdings.map((h, i) => i).filter((i) => holdingMatchesFilter(holdings[i], filter)));
+  const shownValue = isFiltering ? holdings.reduce((s, h, i) => s + (matchedIdxs.has(i) ? (h.valueJpy || 0) : 0), 0) : totalValue;
+  const shownCost = isFiltering ? holdings.reduce((s, h, i) => s + (matchedIdxs.has(i) ? (h.avgJpyTotal || 0) : 0), 0) : totalCost;
+  const shownPl = shownValue - shownCost;
+  const shownCount = isFiltering ? matchedIdxs.size : holdings.length;
+  const pctOfTotal = (v, base) => base > 0 ? `全体の${fmt((v / base) * 100, 1)}%` : "";
 
   const [fetchStatus, setFetchStatus] = useState("");
   const [fetching, setFetching] = useState(false);
@@ -2689,6 +2778,7 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
 
   const groups = {};
   holdings.forEach((h, idx) => {
+    if (!matchedIdxs.has(idx)) return;
     const cat = h.assetCat || "その他";
     if (!groups[cat]) groups[cat] = [];
     groups[cat].push(idx);
@@ -2716,12 +2806,34 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
 
   return (
     <div style={{ paddingBottom: 40 }}>
-      <SectionHeader title="保有ポートフォリオ" sub="評価額・取得額を編集すると合計と集計に反映されます" />
-      <div style={{ display: "flex", gap: 8, padding: "0 16px 14px", flexWrap: "wrap" }}>
-        <StatCard label="評価額合計" value={fmtYen(totalValue)} tone="gold" />
-        <StatCard label="含み損益" value={(totalPl >= 0 ? "+" : "") + fmtYen(totalPl)} tone={totalPl >= 0 ? "sumi" : "seal"} />
-        <StatCard label="保有銘柄数" value={holdings.length + "件"} tone="ink" small />
+      <SectionHeader title="保有ポートフォリオ" sub="評価額・取得額を編集すると合計と集計に反映されます" rightSlot={
+        <button onClick={() => setFilterOpen(true)} style={{
+          fontSize: 11.5, padding: "6px 10px", borderRadius: 4, border: `1px solid ${isFiltering ? GOLD : PAPER_LINE}`,
+          background: isFiltering ? GOLD_SOFT : CARD, color: INK, cursor: "pointer", whiteSpace: "nowrap",
+        }}>🔍 フィルター{isFiltering ? `（${shownCount}件）` : ""}</button>
+      } />
+      <div style={{ padding: "0 16px 10px", display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 11, color: INK_SOFT }}>表示通貨</span>
+        <div style={{ display: "flex", borderRadius: 4, overflow: "hidden", border: `1px solid ${PAPER_LINE}` }}>
+          {["JPY", "USD"].map((c) => (
+            <button key={c} onClick={() => setDisplayCurrency(c)} style={{
+              fontSize: 11.5, padding: "4px 12px", border: "none", cursor: "pointer",
+              background: displayCurrency === c ? GOLD : "#fff", color: displayCurrency === c ? "#fff" : INK,
+            }}>{c === "JPY" ? "円" : "ドル"}</button>
+          ))}
+        </div>
       </div>
+      <div style={{ display: "flex", gap: 8, padding: "0 16px 14px", flexWrap: "wrap" }}>
+        <StatCard label="評価額合計" value={fmtCur(shownValue)} tone="gold" corner={isFiltering ? pctOfTotal(shownValue, totalValue) : undefined} />
+        <StatCard label="含み損益" value={(shownPl >= 0 ? "+" : "") + fmtCur(shownPl)} tone={shownPl >= 0 ? "sumi" : "seal"} corner={isFiltering ? pctOfTotal(shownPl, totalPl) : undefined} />
+        <StatCard label="保有銘柄数" value={shownCount + "件"} tone="ink" small corner={isFiltering ? pctOfTotal(shownCount, holdings.length) : undefined} />
+      </div>
+      {filterOpen && (
+        <PortfolioFilterModal filter={filter} setFilter={setFilter}
+          availAssetCats={availAssetCats} availSubClasses={availSubClasses} availTags={availTags}
+          matchedCount={shownCount} totalCount={holdings.length}
+          onClose={() => setFilterOpen(false)} />
+      )}
 
       <div style={{ padding: "0 16px" }}>
         <AddHoldingForm onAdd={(h) => setHoldings((prev) => [...prev, h])} fxRate={params.fxRate} />
@@ -2763,7 +2875,7 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
       </div>
 
       <div style={{ padding: "0 16px" }}>
-        <Accordion title={`現金 — ${fmtYen(totalCash)}`} colorKey="living" defaultOpen>
+        <Accordion title={`現金 — ${fmtCur(totalCash)}`} colorKey="living" defaultOpen>
           {cashList.map((c, i) => (
             <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: `1px solid ${PAPER_LINE}`, gap: 6 }}>
               <input value={c.bank} onChange={(e) => updateCashField(i, "bank", e.target.value)} placeholder="口座名・メモ"
@@ -2785,10 +2897,10 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
         {Object.entries(groups).map(([cat, idxs]) => {
           const subtotal = idxs.reduce((s, i) => s + (holdings[i].valueJpy || 0), 0);
           return (
-            <Accordion key={cat} title={`${cat} — ${fmtYen(subtotal)}`} colorKey={assetCatColorKey(cat)}>
+            <Accordion key={cat} title={`${cat} — ${fmtCur(subtotal)}`} colorKey={assetCatColorKey(cat)}>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {idxs.map((i) => (
-                  <HoldingCard key={i} h={holdings[i]} fxRate={params.fxRate}
+                  <HoldingCard key={i} h={holdings[i]} fxRate={params.fxRate} fmtCur={fmtCur}
                     onUpdate={(patch) => updateHoldingPatch(i, patch)}
                     onDelete={() => deleteHolding(i)} />
                 ))}
