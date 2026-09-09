@@ -1997,6 +1997,20 @@ function ScenarioModal({ sim, params, setSim, setParams, scenario, setScenario, 
   );
 }
 
+function AssetChartTooltip({ active, payload, label }) {
+  if (!active || !payload || !payload.length) return null;
+  const row = payload[0].payload;
+  return (
+    <div style={{ background: "#fff", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, padding: "8px 10px", fontSize: 12 }}>
+      <div style={{ fontWeight: 600, color: INK, marginBottom: 4 }}>{label}年</div>
+      <div style={{ color: INK, fontWeight: 600, marginBottom: 4 }}>総資産：{fmtMan(row.総資産)}</div>
+      {payload.map((p) => (
+        <div key={p.dataKey} style={{ color: p.color }}>{p.dataKey}：{fmtMan(p.value)}</div>
+      ))}
+    </div>
+  );
+}
+
 function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, onOpenWizard, onOpenSheet }) {
   const model = useMemo(() => computeModel(sim, params), [sim, params]);
   const [activeMarker, setActiveMarker] = useState(null);
@@ -2061,7 +2075,7 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
             <CartesianGrid stroke={PAPER_LINE} vertical={false} />
             <XAxis dataKey="year" tick={{ fontSize: 10, fill: INK_SOFT }} interval={4} />
             <YAxis tick={{ fontSize: 10, fill: INK_SOFT }} />
-            <Tooltip formatter={(v) => fmtMan(v)} labelFormatter={(l) => `${l}年`} contentStyle={{ fontSize: 12, borderRadius: 4 }} />
+            <Tooltip content={<AssetChartTooltip />} />
             <ReferenceLine y={0} stroke={INK} />
             <Area type="monotone" dataKey="金融資産" stackId="a" stroke={GOLD} fill={GOLD} fillOpacity={0.55} />
             <Area type="monotone" dataKey="現金" stackId="a" stroke={"#8FA6C7"} fill={"#8FA6C7"} fillOpacity={0.55} />
