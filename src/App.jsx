@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef, useId } from "react";
 import {
   AreaChart, Area, LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine, ReferenceDot
@@ -656,8 +656,11 @@ function NumField({ value, onChange, width = 74, suffix, readOnly }) {
   );
 }
 
-function Accordion({ title, colorKey, defaultOpen, children, rightSlot, onWizard, wizardLabel }) {
-  const [open, setOpen] = useState(!!defaultOpen);
+function Accordion({ title, colorKey, defaultOpen, children, rightSlot, onWizard, wizardLabel, open: openProp, onToggle }) {
+  const [openState, setOpenState] = useState(!!defaultOpen);
+  const isControlled = openProp !== undefined;
+  const open = isControlled ? openProp : openState;
+  const toggle = () => (isControlled ? onToggle?.(!open) : setOpenState((o) => !o));
   const color = CAT_COLORS[colorKey] || INK;
   return (
     <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 5, marginBottom: 10, overflow: "hidden", background: CARD }}>
@@ -665,7 +668,7 @@ function Accordion({ title, colorKey, defaultOpen, children, rightSlot, onWizard
         width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "10px 12px", background: "#FFFEFC", borderLeft: `5px solid ${color}`,
       }}>
-        <button onClick={() => setOpen((o) => !o)} style={{
+        <button onClick={toggle} style={{
           flex: 1, textAlign: "left", border: "none", background: "transparent", cursor: "pointer", padding: 0,
           fontSize: 14, fontWeight: 600, color: INK,
         }}>{title}</button>
@@ -677,7 +680,7 @@ function Accordion({ title, colorKey, defaultOpen, children, rightSlot, onWizard
               background: GOLD_SOFT, color: INK, cursor: "pointer", lineHeight: 1,
             }}>🧮</button>
           )}
-          <button onClick={() => setOpen((o) => !o)} style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 12, color: INK_SOFT, padding: 0 }}>
+          <button onClick={toggle} style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 12, color: INK_SOFT, padding: 0 }}>
             {open ? "▲" : "▼"}
           </button>
         </span>
@@ -2272,6 +2275,45 @@ function TagPicker({ tags, onChange, suggestions = TAG_SUGGESTIONS }) {
   );
 }
 
+// 銘柄詳細では候補を全部並べず、実際に付いているタグだけをチップで表示する
+// （追加は下の入力欄から、候補は入力補完で出す）
+function TagChipsEditable({ tags, onChange, suggestions = TAG_SUGGESTIONS }) {
+  const listId = useId();
+  const [input, setInput] = useState("");
+  const remove = (t) => onChange(tags.filter((x) => x !== t));
+  const add = () => {
+    const v = input.trim();
+    if (v && !tags.includes(v)) onChange([...tags, v]);
+    setInput("");
+  };
+  return (
+    <div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: tags.length ? 6 : 0 }}>
+        {tags.map((t) => (
+          <span key={t} style={{
+            fontSize: 11, padding: "3px 6px 3px 10px", borderRadius: 12, display: "inline-flex", alignItems: "center", gap: 4,
+            border: `1px solid ${GOLD}`, background: GOLD_SOFT, color: INK,
+          }}>
+            {t}
+            <button type="button" onClick={() => remove(t)} style={{ border: "none", background: "transparent", color: INK_SOFT, cursor: "pointer", fontSize: 12, lineHeight: 1, padding: 0 }}>×</button>
+          </span>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 6 }}>
+        <input list={listId} value={input} onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+          placeholder="タグを追加" style={{ flex: 1, fontSize: 11, padding: "4px 7px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3 }} />
+        <datalist id={listId}>
+          {suggestions.filter((s) => !tags.includes(s)).map((s) => <option key={s} value={s} />)}
+        </datalist>
+        <button type="button" onClick={add} style={{
+          fontSize: 11, padding: "4px 9px", borderRadius: 3, border: `1px solid ${PAPER_LINE}`, background: "#FFFDF9", color: INK_SOFT, cursor: "pointer",
+        }}>＋追加</button>
+      </div>
+    </div>
+  );
+}
+
 function SubClassField({ assetCat, value, onChange }) {
   const listId = "subclass-suggestions";
   return (
@@ -2510,58 +2552,97 @@ function assetCatColorKey(cat) {
   return { "株式": "tuition", "債権": "car", "コモディティ": "housing", "仮想通貨": "social", "不動産": "medical" }[cat] || "other";
 }
 
-function BuyMoreForm({ h, onApply, onCancel, fxRate }) {
+function TradeForm({ kind, idx, h, fxRate, cashList, cashLink, onRequestCashPick, onApplyWithCash, onCancel }) {
   const isFund = h.qtyMode === "nav10000";
-  const [addQty, setAddQty] = useState("");
-  const [addPrice, setAddPrice] = useState("");
+  const currentQty = isFund ? (h.unitsImplied || 0) : (h.qty || 0);
+  const [qtyInput, setQtyInput] = useState("");
+  const [priceInput, setPriceInput] = useState("");
+  const [reflectCash, setReflectCash] = useState(false);
   const fx = h.currency === "ドル建" ? (fxRate || 150) : 1;
-  const addCost = isFund
-    ? ((parseFloat(addQty) || 0) / 10000) * (parseFloat(addPrice) || 0)
-    : (parseFloat(addQty) || 0) * (parseFloat(addPrice) || 0) * fx;
+  const qty = parseFloat(qtyInput) || 0;
+  const amountJpy = isFund ? (qty / 10000) * (parseFloat(priceInput) || 0) : qty * (parseFloat(priceInput) || 0) * fx;
+
+  const isLinkedHere = cashLink && cashLink.holdingIdx === idx;
+  const selectedCashIdx = isLinkedHere ? cashLink.cashIdx : null;
+  const selectedCashRow = selectedCashIdx != null ? cashList[selectedCashIdx] : null;
 
   const apply = () => {
-    const q = parseFloat(addQty) || 0;
-    if (!q) return;
-    const patch = { avgJpyTotal: (h.avgJpyTotal || 0) + addCost };
-    if (isFund) patch.unitsImplied = (h.unitsImplied || 0) + q;
-    else patch.qty = (h.qty || 0) + q;
-    onApply(patch);
+    if (!qty) return;
+    let patch;
+    if (kind === "buy") {
+      patch = { avgJpyTotal: (h.avgJpyTotal || 0) + amountJpy };
+      if (isFund) patch.unitsImplied = currentQty + qty; else patch.qty = currentQty + qty;
+    } else {
+      const ratio = currentQty > 0 ? Math.min(1, qty / currentQty) : 0;
+      patch = {
+        avgJpyTotal: Math.max(0, (h.avgJpyTotal || 0) - (h.avgJpyTotal || 0) * ratio),
+        valueJpy: Math.max(0, (h.valueJpy || 0) - (h.valueJpy || 0) * ratio),
+      };
+      if (isFund) patch.unitsImplied = Math.max(0, currentQty - qty); else patch.qty = Math.max(0, currentQty - qty);
+    }
+    const cashDelta = reflectCash && selectedCashIdx != null ? (kind === "buy" ? -amountJpy : amountJpy) : 0;
+    onApplyWithCash(idx, patch, cashDelta);
   };
+
+  const canApply = qty > 0 && (!reflectCash || selectedCashIdx != null);
 
   return (
     <div style={{ marginTop: 8, padding: 8, border: `1px dashed ${GOLD}`, borderRadius: 4, background: GOLD_SOFT }}>
       <div style={{ fontSize: 11, color: INK_SOFT, marginBottom: 6 }}>
-        買い増し：追加した{isFund ? "口数" : "数量"}と購入単価を入れると、保有数量・取得額に合算します（評価額は自動更新されないので、あとで下の「評価額」欄も更新してください）
+        {kind === "buy"
+          ? `買い増し：追加した${isFund ? "口数" : "数量"}と購入単価を入れると、保有数量・取得額に合算します（評価額は自動更新されないので、あとで「評価額」欄も更新してください）`
+          : `売却：売った${isFund ? "口数" : "数量"}と売却単価を入れると、保有数量・取得額・評価額から按分して差し引きます`}
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 2 }}>
-          追加{isFund ? "口数" : "数量"}
-          <input type="number" value={addQty} onChange={(e) => setAddQty(e.target.value)}
+          {kind === "buy" ? "追加" : "売却"}{isFund ? "口数" : "数量"}
+          <input type="number" value={qtyInput} onChange={(e) => setQtyInput(e.target.value)}
             style={{ width: 90, padding: "4px 6px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3 }} />
         </label>
         <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 2 }}>
-          購入単価{isFund ? "（1万口あたり・円）" : `（${h.currency === "ドル建" ? "$" : "¥"}）`}
-          <input type="number" value={addPrice} onChange={(e) => setAddPrice(e.target.value)}
+          {kind === "buy" ? "購入単価" : "売却単価"}{isFund ? "（1万口あたり・円）" : `（${h.currency === "ドル建" ? "$" : "¥"}）`}
+          <input type="number" value={priceInput} onChange={(e) => setPriceInput(e.target.value)}
             style={{ width: 100, padding: "4px 6px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3 }} />
         </label>
       </div>
-      <div style={{ fontSize: 10.5, color: INK_SOFT, marginTop: 6 }}>追加取得額：{fmtYen(addCost)}</div>
+      <div style={{ fontSize: 10.5, color: INK_SOFT, marginTop: 6 }}>{kind === "buy" ? "追加取得額" : "売却代金"}：{fmtYen(amountJpy)}</div>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, marginTop: 8, cursor: "pointer" }}>
+        <input type="checkbox" checked={reflectCash} onChange={(e) => setReflectCash(e.target.checked)} />
+        現金データにも反映する（{kind === "buy" ? "選んだ口座から購入額を減らす" : "選んだ口座に売却代金を追加する"}）
+      </label>
+      {reflectCash && (
+        <div style={{ marginTop: 6 }}>
+          {selectedCashRow ? (
+            <div style={{ fontSize: 11, color: INK }}>
+              選択中の口座：<b>No.{selectedCashIdx + 1}</b>{selectedCashRow.bank ? `（${selectedCashRow.bank}）` : ""}
+              <button onClick={() => onRequestCashPick(idx)} style={{ marginLeft: 8, fontSize: 10.5, padding: "2px 8px", borderRadius: 10, border: `1px solid ${PAPER_LINE}`, background: "#fff", color: INK_SOFT, cursor: "pointer" }}>変更</button>
+            </div>
+          ) : (
+            <button onClick={() => onRequestCashPick(idx)} style={{ fontSize: 11.5, padding: "5px 10px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`, background: "#fff", color: INK, cursor: "pointer" }}>
+              現金口座を選ぶ →
+            </button>
+          )}
+        </div>
+      )}
       <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-        <button onClick={apply} style={{ fontSize: 11.5, padding: "5px 10px", borderRadius: 4, border: "none", background: SUMI, color: "#fff", cursor: "pointer" }}>合算する</button>
+        <button onClick={apply} disabled={!canApply} style={{
+          fontSize: 11.5, padding: "5px 10px", borderRadius: 4, border: "none",
+          background: canApply ? SUMI : "#C9BFA5", color: "#fff", cursor: canApply ? "pointer" : "default",
+        }}>反映・閉じる</button>
         <button onClick={onCancel} style={{ fontSize: 11.5, padding: "5px 10px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`, background: "transparent", cursor: "pointer" }}>キャンセル</button>
       </div>
     </div>
   );
 }
 
-function HoldingCard({ h, onUpdate, onDelete, fxRate, fmtCur = fmtYen }) {
+function HoldingCard({ h, idx, onUpdate, onDelete, fxRate, fmtCur = fmtYen, cashList, cashLink, onRequestCashPick, onApplyWithCash, onCardRef }) {
   const [expanded, setExpanded] = useState(false);
-  const [buyMoreOpen, setBuyMoreOpen] = useState(false);
+  const [tradeOpen, setTradeOpen] = useState(null); // null | "buy" | "sell"
   const pl = (h.valueJpy || 0) - (h.avgJpyTotal || 0);
   const displayQty = h.qtyMode === "nav10000" ? h.unitsImplied : h.qty;
 
   return (
-    <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 4, overflow: "hidden", background: "#fff" }}>
+    <div ref={(el) => onCardRef?.(idx, el)} style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 4, overflow: "hidden", background: "#fff" }}>
       <button onClick={() => setExpanded((e) => !e)} style={{
         width: "100%", textAlign: "left", padding: "8px 10px", border: "none", background: "transparent", cursor: "pointer",
         display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8,
@@ -2602,7 +2683,7 @@ function HoldingCard({ h, onUpdate, onDelete, fxRate, fmtCur = fmtYen }) {
           </div>
           <div style={{ fontSize: 10.5, color: INK_SOFT, marginBottom: 4 }}>タグ</div>
           <div style={{ marginBottom: 8 }}>
-            <TagPicker tags={h.tags || []} onChange={(tags) => onUpdate({ tags })} />
+            <TagChipsEditable tags={h.tags || []} onChange={(tags) => onUpdate({ tags })} />
           </div>
           <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 2, marginBottom: 8 }}>
             メモ
@@ -2628,9 +2709,12 @@ function HoldingCard({ h, onUpdate, onDelete, fxRate, fmtCur = fmtYen }) {
             </label>
           </div>
           <div style={{ display: "flex", gap: 10, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <button onClick={() => setBuyMoreOpen((o) => !o)} style={{
-              fontSize: 11.5, padding: "6px 10px", borderRadius: 4, border: `1px solid ${GOLD}`, background: buyMoreOpen ? GOLD_SOFT : "#fff", color: INK, cursor: "pointer",
+            <button onClick={() => setTradeOpen((o) => (o === "buy" ? null : "buy"))} style={{
+              fontSize: 11.5, padding: "6px 10px", borderRadius: 4, border: `1px solid ${GOLD}`, background: tradeOpen === "buy" ? GOLD_SOFT : "#fff", color: INK, cursor: "pointer",
             }}>＋ 買い増し</button>
+            <button onClick={() => setTradeOpen((o) => (o === "sell" ? null : "sell"))} style={{
+              fontSize: 11.5, padding: "6px 10px", borderRadius: 4, border: `1px solid ${SEAL}`, background: tradeOpen === "sell" ? SEAL_SOFT : "#fff", color: INK, cursor: "pointer",
+            }}>－ 売却</button>
             {h.autoFetchable ? (
               <span style={{ fontSize: 10.5, color: h.lastUpdated ? SUMI : "#B8A26A" }}>{h.lastUpdated ? `更新:${h.lastUpdated}` : "自動取得対象"}</span>
             ) : (
@@ -2640,10 +2724,11 @@ function HoldingCard({ h, onUpdate, onDelete, fxRate, fmtCur = fmtYen }) {
               marginLeft: "auto", border: "none", background: "transparent", color: SEAL, fontSize: 11.5, cursor: "pointer",
             }}>この銘柄を削除</button>
           </div>
-          {buyMoreOpen && (
-            <BuyMoreForm h={h} fxRate={fxRate}
-              onApply={(patch) => { onUpdate(patch); setBuyMoreOpen(false); }}
-              onCancel={() => setBuyMoreOpen(false)} />
+          {tradeOpen && (
+            <TradeForm kind={tradeOpen} idx={idx} h={h} fxRate={fxRate} cashList={cashList} cashLink={cashLink}
+              onRequestCashPick={onRequestCashPick}
+              onApplyWithCash={(i, patch, cashDelta) => { onApplyWithCash(i, patch, cashDelta); setTradeOpen(null); }}
+              onCancel={() => setTradeOpen(null)} />
           )}
         </div>
       )}
@@ -2652,74 +2737,106 @@ function HoldingCard({ h, onUpdate, onDelete, fxRate, fmtCur = fmtYen }) {
 }
 
 function holdingMatchesFilter(h, filter) {
-  const active = [];
-  if (filter.assetCat.length) active.push(filter.assetCat.includes(h.assetCat || "その他"));
-  if (filter.subClass.length) active.push(filter.subClass.includes(h.subClass || ""));
-  if (filter.tags.length) active.push((h.tags || []).some((t) => filter.tags.includes(t)));
-  if (active.length === 0) return true;
-  return filter.mode === "AND" ? active.every(Boolean) : active.some(Boolean);
+  if (filter.assetCat.length && !filter.assetCat.includes(h.assetCat || "その他")) return false;
+  if (filter.subClass.length && !filter.subClass.includes(h.subClass || "")) return false;
+  if (filter.tags.length && !(h.tags || []).some((t) => filter.tags.includes(t))) return false;
+  return true;
 }
 
-function PortfolioFilterModal({ filter, setFilter, availAssetCats, availSubClasses, availTags, matchedCount, totalCount, onClose }) {
-  const toggle = (key, value) => setFilter((f) => ({
-    ...f, [key]: f[key].includes(value) ? f[key].filter((v) => v !== value) : [...f[key], value],
-  }));
-  const smallBtnStyle = { fontSize: 10.5, padding: "2px 7px", borderRadius: 3, border: `1px solid ${PAPER_LINE}`, background: "#fff", color: INK_SOFT, cursor: "pointer" };
+// 資産クラス→サブクラスの親子関係（保有データから実際に使われている組み合わせを拾う）
+function buildSubClassByCat(holdings) {
+  const map = {};
+  holdings.forEach((h) => {
+    if (!h.subClass) return;
+    const cat = h.assetCat || "その他";
+    (map[cat] || (map[cat] = new Set())).add(h.subClass);
+  });
+  return Object.fromEntries(Object.entries(map).map(([k, v]) => [k, [...v]]));
+}
 
-  const Slicer = ({ title, keyName, options }) => (
-    <div style={{ marginBottom: 18 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-        <div style={{ fontSize: 12.5, fontWeight: 600, color: INK }}>{title}</div>
-        <div style={{ display: "flex", gap: 6 }}>
-          <button onClick={() => setFilter((f) => ({ ...f, [keyName]: options }))} style={smallBtnStyle}>全選択</button>
-          <button onClick={() => setFilter((f) => ({ ...f, [keyName]: [] }))} style={smallBtnStyle}>全解除</button>
-        </div>
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-        {options.length === 0 && <div style={{ fontSize: 11, color: INK_SOFT }}>該当なし</div>}
-        {options.map((o) => (
-          <button key={o} onClick={() => toggle(keyName, o)} style={{
-            fontSize: 11.5, padding: "5px 10px", borderRadius: 12, cursor: "pointer",
-            border: `1px solid ${filter[keyName].includes(o) ? GOLD : PAPER_LINE}`,
-            background: filter[keyName].includes(o) ? GOLD_SOFT : "#fff", color: INK,
-          }}>{o}</button>
-        ))}
-      </div>
-    </div>
-  );
+function PortfolioFilterPopup({ filter, setFilter, availAssetCats, subClassByCat, availTags, matchedCount, totalCount, onClose }) {
+  const [openSlicer, setOpenSlicer] = useState("assetCat");
+  const allSubClasses = [...new Set(Object.values(subClassByCat).flat())];
+  const availSubClasses = filter.assetCat.length
+    ? [...new Set(filter.assetCat.flatMap((c) => subClassByCat[c] || []))]
+    : allSubClasses;
+
+  const toggleAssetCat = (v) => {
+    setFilter((f) => {
+      const nextArr = f.assetCat.includes(v) ? f.assetCat.filter((x) => x !== v) : [...f.assetCat, v];
+      const validSub = new Set(nextArr.length ? nextArr.flatMap((c) => subClassByCat[c] || []) : allSubClasses);
+      return { ...f, assetCat: nextArr, subClass: f.subClass.filter((s) => validSub.has(s)) };
+    });
+  };
+  const toggle = (key, v) => setFilter((f) => ({ ...f, [key]: f[key].includes(v) ? f[key].filter((x) => x !== v) : [...f[key], v] }));
+  const selectAll = (key, options) => setFilter((f) => (key === "assetCat" ? { ...f, assetCat: options } : { ...f, [key]: options }));
+  const clearOne = (key) => setFilter((f) => ({ ...f, [key]: [] }));
+
+  const slicers = [
+    { key: "assetCat", label: "資産クラス", options: availAssetCats, onToggle: toggleAssetCat },
+    { key: "subClass", label: "サブクラス", options: availSubClasses, onToggle: (v) => toggle("subClass", v) },
+    { key: "tags", label: "タグ", options: availTags, onToggle: (v) => toggle("tags", v) },
+  ];
+  const active = slicers.find((s) => s.key === openSlicer);
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: PAPER, zIndex: 200, overflowY: "auto", fontFamily: "'Noto Sans JP','Hiragino Sans',sans-serif" }}>
-      <div style={{ background: INK, color: PAPER, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, zIndex: 5 }}>
-        <div style={{ fontFamily: "'Shippori Mincho','Noto Serif JP',serif", fontSize: 17 }}>🔍 フィルター</div>
-        <button onClick={onClose} style={{ background: "transparent", border: "1px solid #4A5A75", color: PAPER, borderRadius: 4, padding: "5px 10px", fontSize: 12, cursor: "pointer" }}>閉じる ×</button>
-      </div>
-      <div style={{ padding: "14px 16px 40px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18, background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 10, flexWrap: "wrap" }}>
-          <div style={{ fontSize: 12, color: INK_SOFT }}>資産クラス・サブクラス・タグの条件間</div>
-          <div style={{ display: "flex", borderRadius: 4, overflow: "hidden", border: `1px solid ${PAPER_LINE}` }}>
-            {["AND", "OR"].map((m) => (
-              <button key={m} onClick={() => setFilter((f) => ({ ...f, mode: m }))} style={{
-                fontSize: 12, padding: "5px 14px", border: "none", cursor: "pointer",
-                background: filter.mode === m ? GOLD : "#fff", color: filter.mode === m ? "#fff" : INK,
-              }}>{m}</button>
-            ))}
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(30,26,20,0.35)", zIndex: 190 }} />
+      <div style={{
+        position: "fixed", left: 12, right: 12, top: 88, zIndex: 191, background: "#fff", borderRadius: 8,
+        boxShadow: "0 10px 30px rgba(0,0,0,0.25)", border: `1px solid ${PAPER_LINE}`, maxHeight: "76vh",
+        display: "flex", flexDirection: "column", overflow: "hidden",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: INK }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: PAPER }}>🔍 フィルター</div>
+          <button onClick={onClose} style={{ border: "none", background: "transparent", color: PAPER, fontSize: 12, cursor: "pointer" }}>閉じる ×</button>
+        </div>
+        <div style={{ display: "flex", gap: 6, padding: 10 }}>
+          {slicers.map((s) => (
+            <button key={s.key} onClick={() => setOpenSlicer(openSlicer === s.key ? null : s.key)} style={{
+              flex: 1, fontSize: 12, padding: "8px 4px", borderRadius: 4, cursor: "pointer",
+              border: `1px solid ${openSlicer === s.key ? INK : (filter[s.key].length ? GOLD : PAPER_LINE)}`,
+              background: filter[s.key].length ? GOLD_SOFT : "#fff", color: INK, fontWeight: openSlicer === s.key ? 700 : 400,
+            }}>{s.label}{filter[s.key].length ? `（${filter[s.key].length}）` : ""}</button>
+          ))}
+        </div>
+        {active && (
+          <div style={{ padding: "0 12px 12px", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              {active.key === "subClass" && (
+                <div style={{ fontSize: 10.5, color: INK_SOFT }}>
+                  {filter.assetCat.length ? `${filter.assetCat.join("・")}のサブクラス` : "すべてのサブクラス"}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 6, marginLeft: "auto" }}>
+                <button onClick={() => selectAll(active.key, active.options)} style={{ fontSize: 10.5, padding: "2px 7px", borderRadius: 3, border: `1px solid ${PAPER_LINE}`, background: "#fff", color: INK_SOFT, cursor: "pointer" }}>全選択</button>
+                <button onClick={() => clearOne(active.key)} style={{ fontSize: 10.5, padding: "2px 7px", borderRadius: 3, border: `1px solid ${PAPER_LINE}`, background: "#fff", color: INK_SOFT, cursor: "pointer" }}>全解除</button>
+              </div>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {active.options.length === 0 && (
+                <div style={{ fontSize: 11, color: INK_SOFT }}>
+                  {active.key === "subClass" && filter.assetCat.length ? "選択中の資産クラスにサブクラスの登録がありません" : "該当なし"}
+                </div>
+              )}
+              {active.options.map((o) => (
+                <button key={o} onClick={() => active.onToggle(o)} style={{
+                  fontSize: 11.5, padding: "5px 10px", borderRadius: 12, cursor: "pointer",
+                  border: `1px solid ${filter[active.key].includes(o) ? GOLD : PAPER_LINE}`,
+                  background: filter[active.key].includes(o) ? GOLD_SOFT : "#fff", color: INK,
+                }}>{o}</button>
+              ))}
+            </div>
           </div>
+        )}
+        <div style={{ padding: "8px 12px", borderTop: `1px solid ${PAPER_LINE}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontSize: 11.5, color: INK }}>{matchedCount} / {totalCount} 件</div>
+          <button onClick={() => setFilter({ assetCat: [], subClass: [], tags: [] })} style={{
+            fontSize: 11, padding: "4px 10px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`, background: "#FFFDF9", color: INK_SOFT, cursor: "pointer",
+          }}>フィルターをリセット</button>
         </div>
-        <Slicer title="資産クラス" keyName="assetCat" options={availAssetCats} />
-        <Slicer title="サブクラス" keyName="subClass" options={availSubClasses} />
-        <Slicer title="タグ" keyName="tags" options={availTags} />
-        <div style={{ fontSize: 12, color: INK, fontWeight: 600, marginBottom: 4 }}>
-          {matchedCount} / {totalCount} 件が該当
-        </div>
-        <div style={{ fontSize: 10.5, color: INK_SOFT, marginBottom: 14 }}>
-          各項目内は複数選択でOR（いずれか一致）、項目間は上で選んだ{filter.mode === "AND" ? "AND（すべて一致）" : "OR（いずれか一致）"}で絞り込みます。
-        </div>
-        <button onClick={() => setFilter({ assetCat: [], subClass: [], tags: [], mode: "AND" })} style={{
-          fontSize: 11.5, padding: "6px 12px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`, background: "#FFFDF9", color: INK_SOFT, cursor: "pointer",
-        }}>フィルターをリセット</button>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -2733,10 +2850,10 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
   const fmtCur = (jpy) => displayCurrency === "USD" ? "$" + fmt((jpy || 0) / (params.fxRate || 150), 2) : fmtYen(jpy);
 
   const [filterOpen, setFilterOpen] = useState(false);
-  const [filter, setFilter] = useState({ assetCat: [], subClass: [], tags: [], mode: "AND" });
+  const [filter, setFilter] = useState({ assetCat: [], subClass: [], tags: [] });
   const isFiltering = filter.assetCat.length > 0 || filter.subClass.length > 0 || filter.tags.length > 0;
   const availAssetCats = [...new Set(holdings.map((h) => h.assetCat || "その他"))];
-  const availSubClasses = [...new Set(holdings.map((h) => h.subClass).filter(Boolean))];
+  const subClassByCat = buildSubClassByCat(holdings);
   const availTags = [...new Set(holdings.flatMap((h) => h.tags || []))];
   const matchedIdxs = new Set(holdings.map((h, i) => i).filter((i) => holdingMatchesFilter(holdings[i], filter)));
   const shownValue = isFiltering ? holdings.reduce((s, h, i) => s + (matchedIdxs.has(i) ? (h.valueJpy || 0) : 0), 0) : totalValue;
@@ -2804,6 +2921,35 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
     setHoldings((prev) => prev.filter((_, i) => i !== idx));
   };
 
+  // 買い増し・売却を現金口座に反映するための「口座選び」の受け渡し
+  const [cashLink, setCashLink] = useState(null); // { holdingIdx, cashIdx: number|null }
+  const [cashOpen, setCashOpen] = useState(true);
+  const cashSectionRef = useRef(null);
+  const holdingRefs = useRef({});
+  const requestCashPick = (holdingIdx) => {
+    setCashLink({ holdingIdx, cashIdx: null });
+    setCashOpen(true);
+    requestAnimationFrame(() => cashSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
+  const pickCashRow = (cashIdx) => {
+    if (!cashLink) return;
+    const holdingIdx = cashLink.holdingIdx;
+    setCashLink({ holdingIdx, cashIdx });
+    requestAnimationFrame(() => holdingRefs.current[holdingIdx]?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  };
+  const applyTradeWithCash = (holdingIdx, patch, cashDelta) => {
+    updateHoldingPatch(holdingIdx, patch);
+    if (cashLink && cashLink.holdingIdx === holdingIdx && cashLink.cashIdx != null && cashDelta) {
+      const ci = cashLink.cashIdx;
+      setCashList((prev) => {
+        const next = [...prev];
+        next[ci] = { ...next[ci], amount: (next[ci].amount || 0) + cashDelta };
+        return next;
+      });
+    }
+    setCashLink(null);
+  };
+
   return (
     <div style={{ paddingBottom: 40 }}>
       <SectionHeader title="保有ポートフォリオ" sub="評価額・取得額を編集すると合計と集計に反映されます" rightSlot={
@@ -2829,8 +2975,8 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
         <StatCard label="保有銘柄数" value={shownCount + "件"} tone="ink" small corner={isFiltering ? pctOfTotal(shownCount, holdings.length) : undefined} />
       </div>
       {filterOpen && (
-        <PortfolioFilterModal filter={filter} setFilter={setFilter}
-          availAssetCats={availAssetCats} availSubClasses={availSubClasses} availTags={availTags}
+        <PortfolioFilterPopup filter={filter} setFilter={setFilter}
+          availAssetCats={availAssetCats} subClassByCat={subClassByCat} availTags={availTags}
           matchedCount={shownCount} totalCount={holdings.length}
           onClose={() => setFilterOpen(false)} />
       )}
@@ -2875,24 +3021,43 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
       </div>
 
       <div style={{ padding: "0 16px" }}>
-        <Accordion title={`現金 — ${fmtCur(totalCash)}`} colorKey="living" defaultOpen>
-          {cashList.map((c, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: `1px solid ${PAPER_LINE}`, gap: 6 }}>
-              <input value={c.bank} onChange={(e) => updateCashField(i, "bank", e.target.value)} placeholder="口座名・メモ"
-                style={{ flex: 1, fontSize: 13, color: INK, border: "none", borderBottom: `1px dashed ${PAPER_LINE}`, background: "transparent", padding: "2px 2px" }} />
-              <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
-                <span style={{ fontSize: 12, color: INK_SOFT }}>¥</span>
-                <input type="number" value={c.amount} onChange={(e) => updateCash(i, parseFloat(e.target.value) || 0)}
-                  style={{ width: 100, textAlign: "right", fontSize: 13, padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
-              </div>
-              <button onClick={() => deleteCash(i)} title="削除" style={{ border: "none", background: "transparent", color: SEAL, fontSize: 14, cursor: "pointer", padding: "0 2px" }}>×</button>
+        <div ref={cashSectionRef}>
+          {cashLink && cashLink.cashIdx === null && (
+            <div style={{ fontSize: 11.5, color: INK, background: GOLD_SOFT, border: `1px solid ${GOLD}`, borderRadius: 4, padding: "6px 8px", marginBottom: 8 }}>
+              反映する現金口座をタップして選んでください。
             </div>
-          ))}
-          <button onClick={addCash} style={{
-            marginTop: 8, fontSize: 11.5, padding: "5px 10px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`,
-            background: "#FFFDF9", color: INK_SOFT, cursor: "pointer",
-          }}>＋ 現金行を追加</button>
-        </Accordion>
+          )}
+          <Accordion title={`現金 — ${fmtCur(totalCash)}`} colorKey="living" open={cashOpen} onToggle={setCashOpen}>
+            {cashList.map((c, i) => {
+              const picking = cashLink && cashLink.cashIdx === null;
+              const isSelected = cashLink && cashLink.cashIdx === i;
+              return (
+                <div key={i} onClick={picking ? () => pickCashRow(i) : undefined} style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 4px", borderBottom: `1px solid ${PAPER_LINE}`, gap: 6,
+                  cursor: picking ? "pointer" : "default",
+                  background: isSelected ? GOLD_SOFT : picking ? "#FFFDF9" : "transparent",
+                  borderRadius: picking ? 4 : 0,
+                }}>
+                  <span style={{ fontSize: 10.5, color: INK_SOFT, flexShrink: 0, minWidth: 30 }}>No.{i + 1}</span>
+                  <input value={c.bank} onChange={(e) => updateCashField(i, "bank", e.target.value)} placeholder="口座名・メモ" disabled={picking}
+                    style={{ flex: 1, fontSize: 13, color: INK, border: "none", borderBottom: `1px dashed ${PAPER_LINE}`, background: "transparent", padding: "2px 2px" }} />
+                  <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                    <span style={{ fontSize: 12, color: INK_SOFT }}>¥</span>
+                    <input type="number" value={c.amount} onChange={(e) => updateCash(i, parseFloat(e.target.value) || 0)} disabled={picking}
+                      style={{ width: 100, textAlign: "right", fontSize: 13, padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
+                  </div>
+                  {!picking && (
+                    <button onClick={() => deleteCash(i)} title="削除" style={{ border: "none", background: "transparent", color: SEAL, fontSize: 14, cursor: "pointer", padding: "0 2px" }}>×</button>
+                  )}
+                </div>
+              );
+            })}
+            <button onClick={addCash} style={{
+              marginTop: 8, fontSize: 11.5, padding: "5px 10px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`,
+              background: "#FFFDF9", color: INK_SOFT, cursor: "pointer",
+            }}>＋ 現金行を追加</button>
+          </Accordion>
+        </div>
 
         {Object.entries(groups).map(([cat, idxs]) => {
           const subtotal = idxs.reduce((s, i) => s + (holdings[i].valueJpy || 0), 0);
@@ -2900,7 +3065,10 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
             <Accordion key={cat} title={`${cat} — ${fmtCur(subtotal)}`} colorKey={assetCatColorKey(cat)}>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {idxs.map((i) => (
-                  <HoldingCard key={i} h={holdings[i]} fxRate={params.fxRate} fmtCur={fmtCur}
+                  <HoldingCard key={i} idx={i} h={holdings[i]} fxRate={params.fxRate} fmtCur={fmtCur}
+                    cashList={cashList} cashLink={cashLink}
+                    onRequestCashPick={requestCashPick} onApplyWithCash={applyTradeWithCash}
+                    onCardRef={(idx, el) => { holdingRefs.current[idx] = el; }}
                     onUpdate={(patch) => updateHoldingPatch(i, patch)}
                     onDelete={() => deleteHolding(i)} />
                 ))}
