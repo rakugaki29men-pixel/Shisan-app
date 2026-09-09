@@ -2842,6 +2842,437 @@ function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, 
 }
 
 /* ============================================================
+   家計簿（実績入力・集計）
+   ============================================================ */
+const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
+
+function defaultLedgerState() {
+  return {
+    entries: [],
+    categories: [
+      { id: "food", name: "食費", type: "expense", linkPath: null },
+      { id: "eatout", name: "外食", type: "expense", linkPath: null },
+      { id: "daily", name: "日用品・衣服", type: "expense", linkPath: "living.daily_goods" },
+      { id: "utilities", name: "光熱費", type: "expense", linkPath: "living.utilities" },
+      { id: "communication", name: "通信費", type: "expense", linkPath: "living.communication" },
+      { id: "car", name: "車関連", type: "expense", linkPath: null },
+      { id: "housing", name: "住宅", type: "expense", linkPath: null },
+      { id: "medical", name: "医療費", type: "expense", linkPath: null },
+      { id: "education", name: "教育費", type: "expense", linkPath: null },
+      { id: "social", name: "交際費", type: "expense", linkPath: "social" },
+      { id: "leisure", name: "レジャー", type: "expense", linkPath: "leisure" },
+      { id: "other_exp", name: "その他支出", type: "expense", linkPath: "other" },
+      { id: "salary", name: "給料", type: "income", linkPath: "father" },
+      { id: "bonus", name: "賞与", type: "income", linkPath: null },
+      { id: "child_allowance", name: "児童手当", type: "income", linkPath: "other_childAllowance" },
+      { id: "other_inc", name: "その他収入", type: "income", linkPath: null },
+    ],
+  };
+}
+
+// 現在の住宅設定（費用ウィザードのローン試算プランは計算結果のため紐付け対象にできない）に応じて、
+// 家計簿の費目から紐付けられるシミュレーション上の項目一覧を返す
+function getLinkableFields(params) {
+  const expense = [
+    { group: "学費", path: "tuition.child1", label: "子1" },
+    { group: "学費", path: "tuition.child1_extra", label: "子1（習い事等）" },
+    { group: "学費", path: "tuition.child2", label: "子2" },
+    { group: "学費", path: "tuition.child2_extra", label: "子2（習い事等）" },
+    { group: "学費", path: "tuition.child3", label: "子3" },
+    { group: "学費", path: "tuition.child3_extra", label: "子3（習い事等）" },
+    { group: "学費", path: "dorm", label: "子供下宿" },
+    { group: "医療・介護", path: "medical.us", label: "我々" },
+    { group: "医療・介護", path: "medical.gfather_p", label: "父方祖父" },
+    { group: "医療・介護", path: "medical.gmother_p", label: "父方祖母" },
+    { group: "医療・介護", path: "medical.gfather_m", label: "母方祖父" },
+    { group: "医療・介護", path: "medical.gmother_m", label: "母方祖母" },
+    { group: "車", path: "car.body", label: "本体" },
+    { group: "車", path: "car.parking", label: "駐車場" },
+    { group: "車", path: "car.gas", label: "ガス代" },
+    { group: "車", path: "car.insurance", label: "保険" },
+    { group: "車", path: "car.tax", label: "税金" },
+    { group: "車", path: "car.inspection", label: "車検" },
+    { group: "車", path: "car.other", label: "他経費" },
+    { group: "他生活費", path: "living.food_father", label: "食費：父" },
+    { group: "他生活費", path: "living.food_mother", label: "食費：母" },
+    { group: "他生活費", path: "living.food_child1", label: "食費：子1" },
+    { group: "他生活費", path: "living.food_child2", label: "食費：子2" },
+    { group: "他生活費", path: "living.food_child3", label: "食費：子3" },
+    { group: "他生活費", path: "living.utilities", label: "光熱費" },
+    { group: "他生活費", path: "living.communication", label: "通信費" },
+    { group: "他生活費", path: "living.daily_goods", label: "日用品・衣服" },
+    { group: "交際費・レジャー・その他・突発", path: "social", label: "交際費" },
+    { group: "交際費・レジャー・その他・突発", path: "leisure", label: "レジャー他" },
+    { group: "交際費・レジャー・その他・突発", path: "other", label: "その他" },
+    { group: "交際費・レジャー・その他・突発", path: "sudden", label: "突発" },
+  ];
+  if (!params.housingPlanEnabled) {
+    if (params.housingType === 1) {
+      expense.push(
+        { group: "住宅", path: "housing_opt1_loanPayment", label: "ローン支払" },
+        { group: "住宅", path: "housing_opt1_loanDeduction", label: "ローン控除" },
+        { group: "住宅", path: "housing_opt1_propertyTax", label: "固定資産税" },
+        { group: "住宅", path: "housing_opt1_insurance", label: "保険" },
+        { group: "住宅", path: "housing_opt1_repair", label: "修繕費" },
+      );
+    } else if (params.housingType === 2) {
+      expense.push({ group: "住宅", path: "housing_opt2_rent_relocate", label: "賃貸→住替え" });
+    } else if (params.housingType === 3) {
+      expense.push({ group: "住宅", path: "housing_opt3_used_condo", label: "分譲中古" });
+    } else if (params.housingType === 4) {
+      expense.push({ group: "住宅", path: "housing_opt4_rent_to_condo", label: "賃貸→分譲" });
+    }
+  }
+  const income = [
+    { group: "収入", path: "father", label: "父" },
+    { group: "収入", path: "mother", label: "母" },
+    { group: "収入", path: "taxRefund", label: "税還付金他" },
+    { group: "収入", path: "other_childAllowance", label: "子供手当等" },
+    { group: "収入", path: "pension_retirement", label: "年金・退職金" },
+  ];
+  return { expense, income };
+}
+
+function getSimValueAtPath(sim, type, path, idx) {
+  const keys = path.split(".");
+  let obj = type === "income" ? sim.income : sim.expense;
+  for (let k = 0; k < keys.length - 1; k++) obj = obj[keys[k]];
+  return obj[keys[keys.length - 1]][idx] ?? 0;
+}
+function setSimValueAtPath(simDraft, type, path, idx, value) {
+  const keys = path.split(".");
+  let obj = type === "income" ? simDraft.income : simDraft.expense;
+  for (let k = 0; k < keys.length - 1; k++) obj = obj[keys[k]];
+  obj[keys[keys.length - 1]][idx] = value;
+}
+
+function LedgerCategoryEditor({ ledger, setLedger, params }) {
+  const { expense: expenseFields, income: incomeFields } = getLinkableFields(params);
+  const fieldsFor = (type) => (type === "income" ? incomeFields : expenseFields);
+
+  const updateCat = (id, patch) => setLedger((prev) => ({
+    ...prev, categories: prev.categories.map((c) => c.id === id ? { ...c, ...patch } : c),
+  }));
+  const deleteCat = (id) => {
+    const inUse = ledger.entries.some((e) => e.categoryId === id);
+    if (inUse && !window.confirm("この費目を使っている入力データがあります。費目を削除すると、その入力データもまとめて削除されます。よろしいですか？")) return;
+    setLedger((prev) => ({
+      categories: prev.categories.filter((c) => c.id !== id),
+      entries: prev.entries.filter((e) => e.categoryId !== id),
+    }));
+  };
+  const addCat = (type) => {
+    const id = `cat_${Date.now()}`;
+    setLedger((prev) => ({ ...prev, categories: [...prev.categories, { id, name: "新しい費目", type, linkPath: null }] }));
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {["expense", "income"].map((type) => (
+        <div key={type}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: INK_SOFT, marginBottom: 6 }}>{type === "expense" ? "支出の費目" : "収入の費目"}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {ledger.categories.filter((c) => c.type === type).map((c) => (
+              <div key={c.id} style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 4, padding: "6px 8px" }}>
+                <input value={c.name} onChange={(e) => updateCat(c.id, { name: e.target.value })}
+                  style={{ width: 100, fontSize: 12.5, padding: "4px 6px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3 }} />
+                <select value={c.linkPath || ""} onChange={(e) => updateCat(c.id, { linkPath: e.target.value || null })}
+                  style={{ fontSize: 11.5, padding: "4px 6px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, flex: "1 1 160px", color: c.linkPath ? INK : INK_SOFT }}>
+                  <option value="">紐付けなし</option>
+                  {fieldsFor(type).map((f) => (
+                    <option key={f.path} value={f.path}>{f.group} ＞ {f.label}</option>
+                  ))}
+                </select>
+                <button onClick={() => deleteCat(c.id)} style={{ border: "none", background: "transparent", color: SEAL, fontSize: 14, cursor: "pointer" }}>×</button>
+              </div>
+            ))}
+            <button onClick={() => addCat(type)} style={{
+              fontSize: 11.5, padding: "5px 10px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`,
+              background: "#FFFDF9", color: INK_SOFT, cursor: "pointer", alignSelf: "flex-start",
+            }}>＋ {type === "expense" ? "支出" : "収入"}の費目を追加</button>
+          </div>
+        </div>
+      ))}
+      <div style={{ fontSize: 10.5, color: INK_SOFT }}>
+        「紐付け」を設定すると、集計・グラフタブの「実績を転記」でこの費目の年間合計をシミュレーションの該当項目に書き込めます（単位は円→万円に自動換算されます）。
+      </div>
+    </div>
+  );
+}
+
+function LedgerInputTab({ ledger, setLedger, params }) {
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [showCategoryEditor, setShowCategoryEditor] = useState(false);
+
+  const yearEntries = ledger.entries.filter((e) => e.year === year).sort((a, b) => a.month - b.month);
+
+  const addRow = () => {
+    const firstCat = ledger.categories[0];
+    setLedger((prev) => ({
+      ...prev,
+      entries: [...prev.entries, {
+        id: `e_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        year, month: new Date().getMonth() + 1, categoryId: firstCat?.id || "", amount: 0, memo: "",
+      }],
+    }));
+  };
+  const updateRow = (id, patch) => setLedger((prev) => ({ ...prev, entries: prev.entries.map((e) => e.id === id ? { ...e, ...patch } : e) }));
+  const deleteRow = (id) => setLedger((prev) => ({ ...prev, entries: prev.entries.filter((e) => e.id !== id) }));
+
+  return (
+    <div style={{ paddingBottom: 40 }}>
+      <SectionHeader title="実績入力" sub="月ごとの実際の支出・収入を、スプレッドシートのように行を追加して記録します（単位：円）" />
+      <div style={{ padding: "0 16px 12px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
+          対象年
+          <input type="number" value={year} onChange={(e) => setYear(parseInt(e.target.value, 10) || year)}
+            style={{ width: 80, padding: "5px 7px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4 }} />
+        </label>
+        <button onClick={() => setShowCategoryEditor((s) => !s)} style={{
+          fontSize: 11.5, padding: "6px 10px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`, background: CARD, color: INK, cursor: "pointer",
+        }}>{showCategoryEditor ? "費目の設定を閉じる" : "⚙ 費目の設定"}</button>
+      </div>
+      {showCategoryEditor && (
+        <div style={{ padding: "0 16px 14px" }}>
+          <LedgerCategoryEditor ledger={ledger} setLedger={setLedger} params={params} />
+        </div>
+      )}
+
+      <div style={{ padding: "0 16px" }}>
+        <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 5, overflow: "hidden", background: CARD }}>
+          <div style={{ display: "flex", background: INK, color: PAPER, fontSize: 11 }}>
+            <div style={{ width: 52, padding: "6px 4px", textAlign: "center" }}>月</div>
+            <div style={{ flex: "1 1 120px", padding: "6px 6px" }}>費目</div>
+            <div style={{ width: 92, padding: "6px 6px", textAlign: "right" }}>金額</div>
+            <div style={{ flex: "1 1 100px", padding: "6px 6px" }}>メモ</div>
+            <div style={{ width: 30 }} />
+          </div>
+          {yearEntries.length === 0 && (
+            <div style={{ padding: "14px 10px", fontSize: 12, color: INK_SOFT, textAlign: "center" }}>{year}年の入力はまだありません</div>
+          )}
+          {yearEntries.map((e) => (
+            <div key={e.id} style={{ display: "flex", alignItems: "center", borderBottom: `1px solid ${PAPER_LINE}` }}>
+              <select value={e.month} onChange={(ev) => updateRow(e.id, { month: parseInt(ev.target.value, 10) })}
+                style={{ width: 52, padding: "5px 2px", fontSize: 11.5, border: "none", background: "transparent" }}>
+                {MONTHS.map((m) => <option key={m} value={m}>{m}月</option>)}
+              </select>
+              <select value={e.categoryId} onChange={(ev) => updateRow(e.id, { categoryId: ev.target.value })}
+                style={{ flex: "1 1 120px", padding: "5px 4px", fontSize: 11.5, border: "none", background: "transparent" }}>
+                <optgroup label="支出">
+                  {ledger.categories.filter((c) => c.type === "expense").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </optgroup>
+                <optgroup label="収入">
+                  {ledger.categories.filter((c) => c.type === "income").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </optgroup>
+              </select>
+              <input type="number" value={e.amount} onChange={(ev) => updateRow(e.id, { amount: ev.target.value === "" ? 0 : parseFloat(ev.target.value) })}
+                style={{ width: 92, padding: "5px 6px", fontSize: 11.5, textAlign: "right", border: "none", background: "transparent", fontVariantNumeric: "tabular-nums" }} />
+              <input value={e.memo} onChange={(ev) => updateRow(e.id, { memo: ev.target.value })} placeholder="メモ"
+                style={{ flex: "1 1 100px", padding: "5px 6px", fontSize: 11.5, border: "none", background: "transparent" }} />
+              <button onClick={() => deleteRow(e.id)} title="削除" style={{ width: 30, border: "none", background: "transparent", color: SEAL, fontSize: 14, cursor: "pointer" }}>×</button>
+            </div>
+          ))}
+        </div>
+        <button onClick={addRow} style={{
+          marginTop: 8, fontSize: 11.5, padding: "7px 12px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`,
+          background: "#FFFDF9", color: INK_SOFT, cursor: "pointer",
+        }}>＋ 行を追加</button>
+      </div>
+    </div>
+  );
+}
+
+function LedgerSummaryTab({ ledger, setLedger, sim, setSim, params }) {
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [note, setNote] = useState("");
+  const { expense: expenseFields, income: incomeFields } = getLinkableFields(params);
+  const fieldLabel = (type, path) => {
+    const f = (type === "income" ? incomeFields : expenseFields).find((x) => x.path === path);
+    return f ? `${f.group} ＞ ${f.label}` : path;
+  };
+
+  const yearEntries = ledger.entries.filter((e) => e.year === year);
+
+  const monthlyByCategory = {};
+  ledger.categories.forEach((c) => { monthlyByCategory[c.id] = Array(12).fill(0); });
+  yearEntries.forEach((e) => {
+    if (!monthlyByCategory[e.categoryId]) return;
+    monthlyByCategory[e.categoryId][e.month - 1] += e.amount || 0;
+  });
+  const yearTotalByCategory = {};
+  ledger.categories.forEach((c) => { yearTotalByCategory[c.id] = monthlyByCategory[c.id].reduce((a, b) => a + b, 0); });
+
+  const expenseCats = ledger.categories.filter((c) => c.type === "expense");
+  const incomeCats = ledger.categories.filter((c) => c.type === "income");
+  const monthlyExpenseTotal = Array(12).fill(0);
+  const monthlyIncomeTotal = Array(12).fill(0);
+  expenseCats.forEach((c) => monthlyByCategory[c.id].forEach((v, i) => { monthlyExpenseTotal[i] += v; }));
+  incomeCats.forEach((c) => monthlyByCategory[c.id].forEach((v, i) => { monthlyIncomeTotal[i] += v; }));
+  const yearExpenseTotal = monthlyExpenseTotal.reduce((a, b) => a + b, 0);
+  const yearIncomeTotal = monthlyIncomeTotal.reduce((a, b) => a + b, 0);
+
+  const chartData = MONTHS.map((m, i) => ({ month: `${m}月`, 収入: Math.round(monthlyIncomeTotal[i]), 支出: Math.round(monthlyExpenseTotal[i]) }));
+
+  const yearIdx = year - YEARS[0];
+  const inRange = yearIdx >= 0 && yearIdx < N;
+
+  // その年に1件も入力のない費目は転記対象から外す
+  // （紐付けだけ設定してまだ記録していない費目のせいで、既存のシミュレーション値を
+  //   0円で上書きしてしまわないようにするため）
+  const categoriesWithEntries = new Set(yearEntries.map((e) => e.categoryId));
+  const previewByPath = {};
+  ledger.categories.forEach((c) => {
+    if (!c.linkPath || !categoriesWithEntries.has(c.id)) return;
+    const key = `${c.type}:${c.linkPath}`;
+    previewByPath[key] = previewByPath[key] || { type: c.type, path: c.linkPath, yen: 0 };
+    previewByPath[key].yen += yearTotalByCategory[c.id] || 0;
+  });
+  const previewList = Object.values(previewByPath);
+
+  const postActuals = () => {
+    if (!inRange || previewList.length === 0) return;
+    const lines = previewList.map((p) => {
+      const before = getSimValueAtPath(sim, p.type, p.path, yearIdx);
+      const after = Math.round((p.yen / 10000) * 10) / 10;
+      return `・${fieldLabel(p.type, p.path)}：${fmt(before)} → ${fmt(after)} 万円`;
+    });
+    const ok = window.confirm(`${year}年の実績をシミュレーションに転記します。\n${lines.join("\n")}\n\nよろしいですか？`);
+    if (!ok) return;
+    setSim((prev) => {
+      const next = clone(prev);
+      previewList.forEach((p) => {
+        const after = Math.round((p.yen / 10000) * 10) / 10;
+        setSimValueAtPath(next, p.type, p.path, yearIdx, after);
+      });
+      return next;
+    });
+    setNote(`${year}年の実績を反映しました。`);
+    setTimeout(() => setNote(""), 4000);
+  };
+
+  return (
+    <div style={{ paddingBottom: 40 }}>
+      <SectionHeader title="集計・グラフ" sub="月ごとの費目別合計と、収入・支出の推移を確認できます" />
+      <div style={{ padding: "0 16px 12px" }}>
+        <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
+          対象年
+          <input type="number" value={year} onChange={(e) => setYear(parseInt(e.target.value, 10) || year)}
+            style={{ width: 80, padding: "5px 7px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4 }} />
+        </label>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, padding: "0 16px 14px", flexWrap: "wrap" }}>
+        <StatCard label="収入合計" value={`¥${Math.round(yearIncomeTotal).toLocaleString()}`} tone="sumi" />
+        <StatCard label="支出合計" value={`¥${Math.round(yearExpenseTotal).toLocaleString()}`} tone="seal" />
+        <StatCard label="収支" value={`¥${Math.round(yearIncomeTotal - yearExpenseTotal).toLocaleString()}`} tone={yearIncomeTotal >= yearExpenseTotal ? "gold" : "seal"} />
+      </div>
+
+      <div style={{ padding: "0 16px", height: 220, background: CARD, marginBottom: 14 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData} margin={{ top: 10, right: 8, left: -18, bottom: 0 }}>
+            <CartesianGrid stroke={PAPER_LINE} vertical={false} />
+            <XAxis dataKey="month" tick={{ fontSize: 10, fill: INK_SOFT }} />
+            <YAxis tick={{ fontSize: 10, fill: INK_SOFT }} />
+            <Tooltip formatter={(v) => `¥${v.toLocaleString()}`} contentStyle={{ fontSize: 12 }} />
+            <Bar dataKey="収入" fill={SUMI} radius={[2, 2, 0, 0]} />
+            <Bar dataKey="支出" fill={SEAL} radius={[2, 2, 0, 0]} />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div style={{ padding: "0 16px" }}>
+        <div style={{ overflowX: "auto", border: `1px solid ${PAPER_LINE}`, borderRadius: 5 }}>
+          <table style={{ borderCollapse: "collapse", fontSize: 11.5, minWidth: "100%" }}>
+            <thead>
+              <tr style={{ background: INK, color: PAPER }}>
+                <th style={{ padding: "6px 8px", textAlign: "left", position: "sticky", left: 0, background: INK }}>費目</th>
+                {MONTHS.map((m) => <th key={m} style={{ padding: "6px 6px", textAlign: "right", minWidth: 56 }}>{m}月</th>)}
+                <th style={{ padding: "6px 8px", textAlign: "right" }}>合計</th>
+              </tr>
+            </thead>
+            <tbody>
+              {["expense", "income"].map((type) => (
+                <React.Fragment key={type}>
+                  <tr style={{ background: INK_SOFT }}>
+                    <td colSpan={14} style={{ padding: "4px 8px", color: PAPER, fontWeight: 700, position: "sticky", left: 0, background: INK_SOFT }}>{type === "expense" ? "支出" : "収入"}</td>
+                  </tr>
+                  {ledger.categories.filter((c) => c.type === type).map((c) => (
+                    <tr key={c.id} style={{ borderBottom: `1px solid ${PAPER_LINE}`, background: CARD }}>
+                      <td style={{ padding: "5px 8px", position: "sticky", left: 0, background: CARD, whiteSpace: "nowrap" }}>
+                        {c.name}{c.linkPath && <span title="シミュレーションに紐付け済み" style={{ marginLeft: 4 }}>🔗</span>}
+                      </td>
+                      {monthlyByCategory[c.id].map((v, i) => (
+                        <td key={i} style={{ padding: "5px 6px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: v ? INK : "#C9C2B0" }}>{Math.round(v).toLocaleString()}</td>
+                      ))}
+                      <td style={{ padding: "5px 8px", textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{Math.round(yearTotalByCategory[c.id]).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                  <tr style={{ borderBottom: `2px solid ${INK}`, background: GOLD_SOFT }}>
+                    <td style={{ padding: "5px 8px", fontWeight: 700, position: "sticky", left: 0, background: GOLD_SOFT }}>{type === "expense" ? "支出合計" : "収入合計"}</td>
+                    {(type === "expense" ? monthlyExpenseTotal : monthlyIncomeTotal).map((v, i) => (
+                      <td key={i} style={{ padding: "5px 6px", textAlign: "right", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{Math.round(v).toLocaleString()}</td>
+                    ))}
+                    <td style={{ padding: "5px 8px", textAlign: "right", fontWeight: 700 }}>{Math.round(type === "expense" ? yearExpenseTotal : yearIncomeTotal).toLocaleString()}</td>
+                  </tr>
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style={{ padding: "16px 16px 0" }}>
+        <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 12 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: INK, marginBottom: 6 }}>実績をシミュレーションに転記</div>
+          {!inRange ? (
+            <div style={{ fontSize: 11.5, color: SEAL }}>{year}年はシミュレーションの期間（{YEARS[0]}〜{YEARS[N - 1]}年）の外なので転記できません。</div>
+          ) : previewList.length === 0 ? (
+            <div style={{ fontSize: 11.5, color: INK_SOFT }}>紐付けされている費目がまだありません。「実績入力」タブの「費目の設定」から紐付けてください。</div>
+          ) : (
+            <>
+              <div style={{ fontSize: 11, color: INK_SOFT, marginBottom: 8 }}>
+                {previewList.map((p) => (
+                  <div key={`${p.type}:${p.path}`}>・{fieldLabel(p.type, p.path)}：{fmt(getSimValueAtPath(sim, p.type, p.path, yearIdx))} → {fmt(Math.round((p.yen / 10000) * 10) / 10)} 万円</div>
+                ))}
+              </div>
+              <button onClick={postActuals} style={{
+                fontSize: 12, padding: "8px 14px", borderRadius: 4, border: "none", background: GOLD, color: "#fff", cursor: "pointer",
+              }}>{year}年の実績を転記する</button>
+            </>
+          )}
+          <div style={{ fontSize: 10, color: INK_SOFT, marginTop: 8 }}>
+            紐付けた費目のうち、{year}年に入力がある費目だけを対象に、その年間合計額（円→万円に自動換算）でシミュレーションのその年の値を上書きします。まだ入力していない費目やその他の年には影響しません。
+          </div>
+          {note && <div style={{ fontSize: 11.5, color: SUMI, marginTop: 6 }}>{note}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LedgerApp({ sim, setSim, params, ledger, setLedger, onBack }) {
+  const [ledgerTab, setLedgerTab] = useState("input");
+  return (
+    <div style={{ fontFamily: "'Noto Sans JP','Hiragino Sans',sans-serif", background: PAPER, minHeight: "100%", color: INK }}>
+      <div style={{ background: INK, color: PAPER, padding: "14px 16px 10px", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <div style={{ fontFamily: "'Shippori Mincho','Noto Serif JP',serif", fontSize: 18, letterSpacing: "0.06em" }}>家計簿</div>
+          <div style={{ fontSize: 10.5, color: "#AEB9CC", marginTop: 2 }}>実績の記録・集計</div>
+        </div>
+        <button onClick={onBack} style={{
+          fontSize: 11, color: "#D8C089", background: "transparent", border: "1px solid #4A5A75",
+          borderRadius: 4, padding: "6px 10px", cursor: "pointer", whiteSpace: "nowrap",
+        }}>⬅ ライフポートフォリオへ</button>
+      </div>
+      <TabBar tabs={[{ key: "input", label: "入力" }, { key: "summary", label: "集計・グラフ" }]} active={ledgerTab} onChange={setLedgerTab} />
+      {ledgerTab === "input" && <LedgerInputTab ledger={ledger} setLedger={setLedger} params={params} />}
+      {ledgerTab === "summary" && <LedgerSummaryTab ledger={ledger} setLedger={setLedger} sim={sim} setSim={setSim} params={params} />}
+    </div>
+  );
+}
+
+/* ============================================================
    ルートアプリ
    ============================================================ */
 const STORAGE_KEY = "kakeibo_sim_state_v1";
@@ -2862,6 +3293,8 @@ export default function App() {
   const [showSheet, setShowSheet] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [costWizardStep, setCostWizardStep] = useState("tuition");
+  const [ledger, setLedger] = useState(defaultLedgerState);
+  const [appMode, setAppMode] = useState("sim");
   const openCostWizard = (step) => { setCostWizardStep(step); setShowCostWizard(true); };
   const saveTimer = useRef(null);
 
@@ -2876,6 +3309,7 @@ export default function App() {
         if (parsed.cashList) setCashList(parsed.cashList);
         if (parsed.yearSnapshots) setYearSnapshots(parsed.yearSnapshots);
         if (parsed.family) setFamily(parsed.family);
+        if (parsed.ledger) setLedger({ ...defaultLedgerState(), ...parsed.ledger });
       }
     } catch (e) { /* no saved state yet */ }
     setLoaded(true);
@@ -2886,27 +3320,28 @@ export default function App() {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ sim, params, holdings, cashList, yearSnapshots, family }));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ sim, params, holdings, cashList, yearSnapshots, family, ledger }));
         setSaveNote("保存済み");
         setTimeout(() => setSaveNote(""), 1500);
       } catch (e) { /* storage unavailable */ }
     }, 700);
     return () => clearTimeout(saveTimer.current);
-  }, [sim, params, holdings, cashList, yearSnapshots, family, loaded]);
+  }, [sim, params, holdings, cashList, yearSnapshots, family, ledger, loaded]);
 
   const resetAll = () => {
-    if (!window.confirm("編集内容をすべて元のデータに戻しますか？")) return;
+    if (!window.confirm("編集内容をすべて元のデータに戻しますか？（家計簿の入力データも消えます）")) return;
     setSim(defaultSimState());
     setParams(defaultParamsState());
     setHoldings(defaultPortfolioState());
     setCashList(defaultCashState());
     setYearSnapshots({});
     setFamily(defaultFamilyState());
+    setLedger(defaultLedgerState());
   };
 
   const fileInputRef = useRef(null);
   const exportData = () => {
-    const payload = { sim, params, holdings, cashList, yearSnapshots, family, exportedAt: new Date().toISOString() };
+    const payload = { sim, params, holdings, cashList, yearSnapshots, family, ledger, exportedAt: new Date().toISOString() };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -2932,6 +3367,7 @@ export default function App() {
         if (parsed.cashList) setCashList(parsed.cashList);
         if (parsed.yearSnapshots) setYearSnapshots(parsed.yearSnapshots);
         if (parsed.family) setFamily(parsed.family);
+        if (parsed.ledger) setLedger({ ...defaultLedgerState(), ...parsed.ledger });
         setSaveNote("読み込み完了");
         setTimeout(() => setSaveNote(""), 1500);
       } catch (err) {
@@ -2942,6 +3378,10 @@ export default function App() {
     e.target.value = "";
   };
 
+  if (appMode === "ledger") {
+    return <LedgerApp sim={sim} setSim={setSim} params={params} ledger={ledger} setLedger={setLedger} onBack={() => setAppMode("sim")} />;
+  }
+
   return (
     <div style={{ fontFamily: "'Noto Sans JP','Hiragino Sans',sans-serif", background: PAPER, minHeight: "100%", color: INK }}>
       <div style={{ background: INK, color: PAPER, padding: "14px 16px 10px", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
@@ -2949,10 +3389,16 @@ export default function App() {
           <div style={{ fontFamily: "'Shippori Mincho','Noto Serif JP',serif", fontSize: 18, letterSpacing: "0.06em" }}>ライフポートフォリオ</div>
           <div style={{ fontSize: 10.5, color: "#AEB9CC", marginTop: 2 }}>{YEARS[0]}–{YEARS[N - 1]} 年 資産・収支プラン</div>
         </div>
-        <button onClick={() => setShowSettings(true)} aria-label="設定" style={{
-          fontSize: 18, color: "#D8C089", background: "transparent", border: "1px solid #4A5A75",
-          borderRadius: 4, padding: "5px 9px", cursor: "pointer", lineHeight: 1,
-        }}>⚙</button>
+        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+          <button onClick={() => setAppMode("ledger")} aria-label="家計簿" style={{
+            fontSize: 11, color: "#D8C089", background: "transparent", border: "1px solid #4A5A75",
+            borderRadius: 4, padding: "5px 9px", cursor: "pointer", whiteSpace: "nowrap",
+          }}>📔 家計簿</button>
+          <button onClick={() => setShowSettings(true)} aria-label="設定" style={{
+            fontSize: 18, color: "#D8C089", background: "transparent", border: "1px solid #4A5A75",
+            borderRadius: 4, padding: "5px 9px", cursor: "pointer", lineHeight: 1,
+          }}>⚙</button>
+        </div>
       </div>
       <input ref={fileInputRef} type="file" accept="application/json" onChange={handleImportFile} style={{ display: "none" }} />
       {showSettings && (
