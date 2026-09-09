@@ -138,6 +138,29 @@ function defaultParamsState() {
     fxRate: RAW.portfolio.usdjpy || 150,
     downPayment: 0,
     housingSubsidyAnnual: 0,
+    housingPlanEnabled: false,
+    housingPlanPropertyType: "house",
+    housingPlanCondition: "new",
+    housingPlanPurchaseYear: new Date().getFullYear(),
+    housingPlanPrice: 0,
+    housingPlanDownPayment: 0,
+    housingPlanRate: 0.01,
+    housingPlanRateIncrease: 0,
+    housingPlanRepaymentMode: "fixed",
+    housingPlanTermYears: 35,
+    housingPlanOtherAnnual: 0,
+    housingPlanMoveEnabled: false,
+    housingPlanMoveYear: new Date().getFullYear() + 10,
+    housingPlanMoveSaleProceeds: 0,
+    housingPlanMovePropertyType: "condo",
+    housingPlanMoveCondition: "new",
+    housingPlanMovePrice: 0,
+    housingPlanMoveDownPayment: 0,
+    housingPlanMoveRate: 0.01,
+    housingPlanMoveRateIncrease: 0,
+    housingPlanMoveRepaymentMode: "fixed",
+    housingPlanMoveTermYears: 30,
+    housingPlanMoveOtherAnnual: 0,
   };
 }
 
@@ -226,6 +249,58 @@ function sumArrAt(obj, keys, i) {
   return s;
 }
 
+/* ============================================================
+   住宅ローン試算プラン（費用ウィザードの「住宅」から設定）
+   購入・住み替えを、価格/頭金/金利/返済方式から年別に計算する。
+   既存の housing_opt1〜4 の実績配列とは独立した計算経路。
+   ============================================================ */
+function calcAnnuityPayment(principal, rate, years) {
+  if (years <= 0) return principal;
+  if (rate === 0) return principal / years;
+  return (principal * rate) / (1 - Math.pow(1 + rate, -years));
+}
+
+function computeHousingPlan(params) {
+  const housingCost = zeros(), loanBalance = zeros(), realEstateAsset = zeros();
+  const purchaseIdx = YEARS.indexOf(params.housingPlanPurchaseYear);
+  const moveIdx = params.housingPlanMoveEnabled ? YEARS.indexOf(params.housingPlanMoveYear) : -1;
+  let regime = null;
+
+  const startRegime = (i, price, downPayment, rate, rateIncrease, mode, term, otherAnnual, oneTimeCashEffect) => {
+    regime = { startIdx: i, price, rate, rateIncrease: rateIncrease || 0, mode, term, otherAnnual: otherAnnual || 0 };
+    loanBalance[i] = Math.max(0, (price || 0) - (downPayment || 0));
+    regime.fixedPayment = calcAnnuityPayment(loanBalance[i], rate || 0, term || 1);
+    housingCost[i] = regime.fixedPayment + regime.otherAnnual + (oneTimeCashEffect || 0);
+    realEstateAsset[i] = params.includeRealEstate ? (price || 0) - loanBalance[i] : 0;
+  };
+
+  for (let i = 0; i < N; i++) {
+    if (i === purchaseIdx) {
+      startRegime(i, params.housingPlanPrice, params.housingPlanDownPayment, params.housingPlanRate,
+        params.housingPlanRateIncrease, params.housingPlanRepaymentMode, params.housingPlanTermYears, params.housingPlanOtherAnnual, 0);
+      continue;
+    }
+    if (i === moveIdx) {
+      const cashEffect = (params.housingPlanMoveDownPayment || 0) - (params.housingPlanMoveSaleProceeds || 0);
+      startRegime(i, params.housingPlanMovePrice, params.housingPlanMoveDownPayment, params.housingPlanMoveRate,
+        params.housingPlanMoveRateIncrease, params.housingPlanMoveRepaymentMode, params.housingPlanMoveTermYears, params.housingPlanMoveOtherAnnual, cashEffect);
+      continue;
+    }
+    if (!regime || i < regime.startIdx) continue;
+    const yrsSince = i - regime.startIdx;
+    const currentRate = regime.rate + regime.rateIncrease * yrsSince;
+    const prevBal = loanBalance[i - 1];
+    const interest = prevBal * currentRate;
+    const payment = regime.mode === "variable"
+      ? calcAnnuityPayment(prevBal, currentRate, Math.max(1, regime.term - yrsSince))
+      : regime.fixedPayment;
+    loanBalance[i] = Math.max(0, prevBal - (payment - interest));
+    housingCost[i] = payment + regime.otherAnnual;
+    realEstateAsset[i] = params.includeRealEstate ? regime.price - loanBalance[i] : 0;
+  }
+  return { housingCost, loanBalance, realEstateAsset };
+}
+
 function computeModel(sim, params) {
   const exp = sim.expense;
   const inc = sim.income;
@@ -236,17 +311,29 @@ function computeModel(sim, params) {
   const livingKeys = ["food_father", "food_mother", "food_child1", "food_child2", "food_child3", "utilities", "communication", "daily_goods"];
 
   const tuition = zeros(), medical = zeros(), carTotal = zeros(), livingTotal = zeros();
-  const housingCost = zeros(), loanBalance = zeros(), loanInterest = zeros();
-  const buildingVal = zeros(), landVal = zeros(), saleEstimate = zeros(), realEstateAsset = zeros();
+  let housingCost = zeros(), loanBalance = zeros(), loanInterest = zeros();
+  const buildingVal = zeros(), landVal = zeros(), saleEstimate = zeros();
+  let realEstateAsset = zeros();
 
   const houseStartIdx = 1;
   const AMORT_YEARS = 22;
+  const housingPlan = params.housingPlanEnabled ? computeHousingPlan(params) : null;
+  if (housingPlan) {
+    housingCost = housingPlan.housingCost;
+    loanBalance = housingPlan.loanBalance;
+    realEstateAsset = housingPlan.realEstateAsset;
+  }
 
   for (let i = 0; i < N; i++) {
     tuition[i] = sumArrAt(exp.tuition, tuitionKeys, i);
     medical[i] = sumArrAt(exp.medical, medicalKeys, i);
     carTotal[i] = sumArrAt(exp.car, carKeys, i);
     livingTotal[i] = sumArrAt(exp.living, livingKeys, i);
+
+    if (housingPlan) {
+      housingCost[i] -= (params.housingSubsidyAnnual || 0);
+      continue;
+    }
 
     if (params.housingType === 1 && i >= houseStartIdx) {
       const yrsSince = i - houseStartIdx;
@@ -280,7 +367,7 @@ function computeModel(sim, params) {
     } else {
       housingCost[i] = exp.housing_opt4_rent_to_condo[i] ?? 0;
     }
-    housingCost[i] = Math.max(0, housingCost[i] - (params.housingSubsidyAnnual || 0));
+    housingCost[i] -= (params.housingSubsidyAnnual || 0);
   }
 
   const expenseTotal = zeros(), incomeTotal = zeros(), balance = zeros();
@@ -655,17 +742,83 @@ function TuitionWizardSlide({ sim, setSim, family }) {
   );
 }
 
+function NumInput({ label, value, onChange, width = 110, suffix }) {
+  return (
+    <label style={{ fontSize: 11.5, display: "flex", flexDirection: "column", gap: 4 }}>
+      {label}
+      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <input type="number" value={value} onChange={(e) => onChange(e.target.value === "" ? 0 : parseFloat(e.target.value))}
+          style={{ width, padding: "6px 8px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, fontVariantNumeric: "tabular-nums" }} />
+        {suffix && <span style={{ fontSize: 11, color: INK_SOFT }}>{suffix}</span>}
+      </div>
+    </label>
+  );
+}
+
+function PropertyLoanFields({ plan, setPlan, prefix }) {
+  const p = (key) => plan[`${prefix}${key}`];
+  const set = (key) => (v) => setPlan({ [`${prefix}${key}`]: v });
+  return (
+    <>
+      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+        <PillChoice value={p("PropertyType")} onChange={set("PropertyType")}
+          options={[{ label: "戸建て", value: "house" }, { label: "マンション", value: "condo" }]} />
+        <PillChoice value={p("Condition")} onChange={set("Condition")}
+          options={[{ label: "新築", value: "new" }, { label: "中古", value: "used" }]} />
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+        <NumInput label="物件価格" value={p("Price")} onChange={set("Price")} suffix="万円" />
+        <NumInput label="頭金" value={p("DownPayment")} onChange={set("DownPayment")} suffix="万円" />
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+        <NumInput label="金利（初期・年率）" value={(p("Rate") * 100).toFixed(2)} onChange={(v) => set("Rate")(v / 100)} width={90} suffix="%" />
+        <NumInput label="金利上昇率（年率）" value={(p("RateIncrease") * 100).toFixed(2)} onChange={(v) => set("RateIncrease")(v / 100)} width={90} suffix="%/年" />
+        <NumInput label="ローン年数" value={p("TermYears")} onChange={set("TermYears")} width={80} suffix="年" />
+      </div>
+      <div style={{ marginBottom: 4 }}>
+        <div style={{ fontSize: 11, color: INK_SOFT, marginBottom: 4 }}>返済方式</div>
+        <PillChoice value={p("RepaymentMode")} onChange={set("RepaymentMode")}
+          options={[
+            { label: "固定返済額（金利が上がると完済が延びる）", value: "fixed" },
+            { label: "変動（毎年その時点の金利で再計算）", value: "variable" },
+          ]}
+        />
+      </div>
+      <NumInput label="その他年間費用（管理費・固定資産税等の概算）" value={p("OtherAnnual")} onChange={set("OtherAnnual")} suffix="万円/年" />
+    </>
+  );
+}
+
 function HousingWizardSlide({ params, setParams, setSim }) {
   const thisYear = new Date().getFullYear();
   const [housingType, setHousingType] = useState(params.housingType);
   const [downPayment, setDownPayment] = useState(params.downPayment || 0);
   const [subsidy, setSubsidy] = useState(params.housingSubsidyAnnual || 0);
   const [resetRepair, setResetRepair] = useState(false);
+
+  const [planEnabled, setPlanEnabled] = useState(params.housingPlanEnabled || false);
+  const [plan, setPlanState] = useState(() => ({
+    housingPlanPropertyType: params.housingPlanPropertyType, housingPlanCondition: params.housingPlanCondition,
+    housingPlanPurchaseYear: params.housingPlanPurchaseYear, housingPlanPrice: params.housingPlanPrice,
+    housingPlanDownPayment: params.housingPlanDownPayment, housingPlanRate: params.housingPlanRate,
+    housingPlanRateIncrease: params.housingPlanRateIncrease, housingPlanRepaymentMode: params.housingPlanRepaymentMode,
+    housingPlanTermYears: params.housingPlanTermYears, housingPlanOtherAnnual: params.housingPlanOtherAnnual,
+    housingPlanMoveEnabled: params.housingPlanMoveEnabled, housingPlanMoveYear: params.housingPlanMoveYear,
+    housingPlanMoveSaleProceeds: params.housingPlanMoveSaleProceeds, housingPlanMovePropertyType: params.housingPlanMovePropertyType,
+    housingPlanMoveCondition: params.housingPlanMoveCondition, housingPlanMovePrice: params.housingPlanMovePrice,
+    housingPlanMoveDownPayment: params.housingPlanMoveDownPayment, housingPlanMoveRate: params.housingPlanMoveRate,
+    housingPlanMoveRateIncrease: params.housingPlanMoveRateIncrease, housingPlanMoveRepaymentMode: params.housingPlanMoveRepaymentMode,
+    housingPlanMoveTermYears: params.housingPlanMoveTermYears, housingPlanMoveOtherAnnual: params.housingPlanMoveOtherAnnual,
+  }));
+  const setPlan = (patch) => setPlanState((prev) => ({ ...prev, ...patch }));
   const [applied, setApplied] = useState("");
 
   const apply = () => {
-    setParams((p) => ({ ...p, housingType, downPayment, housingSubsidyAnnual: subsidy }));
-    if (housingType === 1 && resetRepair) {
+    setParams((p) => ({
+      ...p, housingType, downPayment, housingSubsidyAnnual: subsidy,
+      housingPlanEnabled: planEnabled, ...plan,
+    }));
+    if (!planEnabled && housingType === 1 && resetRepair) {
       setSim((prev) => {
         const next = clone(prev);
         YEARS.forEach((y, idx) => { if (y >= thisYear) next.expense.housing_opt1_repair[idx] = HOUSE_REPAIR_FLAT_ANNUAL; });
@@ -678,37 +831,65 @@ function HousingWizardSlide({ params, setParams, setSim }) {
 
   return (
     <div>
-      <p style={{ fontSize: 12.5, color: INK_SOFT, margin: "0 0 14px" }}>
-        住居プラン・頭金・会社の住宅補助を設定します。頭金はローンの借入額から差し引かれ、住宅補助は毎年の住宅費から差し引かれます。
-      </p>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: INK, marginBottom: 14 }}>
+        <input type="checkbox" checked={planEnabled} onChange={(e) => setPlanEnabled(e.target.checked)} />
+        住宅ローンを試算する（価格・頭金・金利からこの画面で計算します）
+      </label>
 
-      <div style={{ fontSize: 11.5, fontWeight: 700, color: INK_SOFT, marginBottom: 6 }}>住居プラン</div>
-      <PillChoice
-        value={housingType}
-        onChange={setHousingType}
-        options={[1, 2, 3, 4].map((v) => ({ label: HOUSING_LABELS[v], value: v }))}
-      />
+      {!planEnabled ? (
+        <>
+          <p style={{ fontSize: 12.5, color: INK_SOFT, margin: "0 0 14px" }}>
+            住居プラン・頭金・会社の住宅補助を設定します。頭金はローンの借入額から差し引かれ、住宅補助は毎年の住宅費から差し引かれます。
+          </p>
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: INK_SOFT, marginBottom: 6 }}>住居プラン</div>
+          <PillChoice
+            value={housingType}
+            onChange={setHousingType}
+            options={[1, 2, 3, 4].map((v) => ({ label: HOUSING_LABELS[v], value: v }))}
+          />
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
+            <NumInput label={`頭金${housingType !== 1 ? "（戸建て購入時のみ反映）" : ""}`} value={downPayment} onChange={setDownPayment} suffix="万円" />
+            <NumInput label="会社の住宅補助" value={subsidy} onChange={setSubsidy} suffix="万円/年" />
+          </div>
+          {housingType === 1 && (
+            <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 14, fontSize: 12.5, color: INK_SOFT }}>
+              <input type="checkbox" checked={resetRepair} onChange={(e) => setResetRepair(e.target.checked)} />
+              修繕費を目安値（今年以降 年{fmt(HOUSE_REPAIR_FLAT_ANNUAL)}万円）で一括設定する
+            </label>
+          )}
+          <WizardRefBox>{HOUSE_REPAIR_SOURCE}</WizardRefBox>
+        </>
+      ) : (
+        <>
+          <p style={{ fontSize: 12.5, color: INK_SOFT, margin: "0 0 14px" }}>
+            物件価格・頭金・金利から、返済額とローン残高を年別に計算し、既存の住居プラン設定を上書きします。
+          </p>
+          <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 14, marginBottom: 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>購入する物件</div>
+            <NumInput label="購入年" value={plan.housingPlanPurchaseYear} onChange={(v) => setPlan({ housingPlanPurchaseYear: v })} width={90} />
+            <div style={{ height: 10 }} />
+            <PropertyLoanFields plan={plan} setPlan={setPlan} prefix="housingPlan" />
+          </div>
 
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
-        <label style={{ fontSize: 11.5, display: "flex", flexDirection: "column", gap: 4 }}>
-          頭金（万円）{housingType !== 1 && <span style={{ color: INK_SOFT }}>※戸建て購入の場合のみ反映</span>}
-          <input type="number" value={downPayment} onChange={(e) => setDownPayment(e.target.value === "" ? 0 : parseFloat(e.target.value))}
-            style={{ width: 120, padding: "6px 8px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, fontVariantNumeric: "tabular-nums" }} />
-        </label>
-        <label style={{ fontSize: 11.5, display: "flex", flexDirection: "column", gap: 4 }}>
-          会社の住宅補助（万円/年）
-          <input type="number" value={subsidy} onChange={(e) => setSubsidy(e.target.value === "" ? 0 : parseFloat(e.target.value))}
-            style={{ width: 120, padding: "6px 8px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, fontVariantNumeric: "tabular-nums" }} />
-        </label>
-      </div>
+          <NumInput label="会社の住宅補助" value={subsidy} onChange={setSubsidy} suffix="万円/年" />
 
-      {housingType === 1 && (
-        <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 14, fontSize: 12.5, color: INK_SOFT }}>
-          <input type="checkbox" checked={resetRepair} onChange={(e) => setResetRepair(e.target.checked)} />
-          修繕費を目安値（今年以降 年{fmt(HOUSE_REPAIR_FLAT_ANNUAL)}万円）で一括設定する
-        </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: INK, margin: "16px 0 10px" }}>
+            <input type="checkbox" checked={plan.housingPlanMoveEnabled} onChange={(e) => setPlan({ housingPlanMoveEnabled: e.target.checked })} />
+            住み替えを設定する
+          </label>
+          {plan.housingPlanMoveEnabled && (
+            <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 14 }}>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+                <NumInput label="住み替え年" value={plan.housingPlanMoveYear} onChange={(v) => setPlan({ housingPlanMoveYear: v })} width={90} />
+                <NumInput label="今の家の売却代金（ローン残高引き後・手入力）" value={plan.housingPlanMoveSaleProceeds} onChange={(v) => setPlan({ housingPlanMoveSaleProceeds: v })} suffix="万円" />
+              </div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>新しい物件</div>
+              <PropertyLoanFields plan={plan} setPlan={setPlan} prefix="housingPlanMove" />
+              <div style={{ fontSize: 11, color: INK_SOFT, marginTop: 6 }}>売却代金は新居の頭金にそのまま充当せず、差額（新居頭金－売却代金）をその年の住宅費として加減算します。</div>
+            </div>
+          )}
+        </>
       )}
-      <WizardRefBox>{HOUSE_REPAIR_SOURCE}</WizardRefBox>
 
       <div style={{ marginTop: 16 }}>
         <button onClick={apply} style={{ fontSize: 13, padding: "10px 18px", borderRadius: 5, border: "none", background: GOLD, color: "#fff", fontWeight: 600, cursor: "pointer" }}>
@@ -1014,8 +1195,14 @@ function SheetTab({ sim, setSim, params, family, setFamily }) {
             <SheetRow label={childLabel("gfather_m", "母方祖父")} arr={exp.medical.gfather_m} onChange={mk("medical.gfather_m")} indent />
             <SheetRow label={childLabel("gmother_m", "母方祖母")} arr={exp.medical.gmother_m} onChange={mk("medical.gmother_m")} indent />
 
-            <SheetSectionLabel text={`住宅（${HOUSING_LABELS[params.housingType]}）`} />
-            {params.housingType === 1 ? (
+            <SheetSectionLabel text={params.housingPlanEnabled ? "住宅（費用ウィザードのローン試算）" : `住宅（${HOUSING_LABELS[params.housingType]}）`} />
+            {params.housingPlanEnabled ? (
+              <>
+                <SheetRow label="住宅費（返済額＋その他）" arr={model.housingCost} indent />
+                <SheetRow label="ローン残高" arr={model.loanBalance} indent />
+                <SheetRow label="住宅資産（残存評価）" arr={model.realEstateAsset} indent />
+              </>
+            ) : params.housingType === 1 ? (
               <>
                 <SheetRow label="ローン支払" arr={exp.housing_opt1_loanPayment} onChange={mk("housing_opt1_loanPayment")} indent />
                 <SheetRow label="ローン控除" arr={exp.housing_opt1_loanDeduction} onChange={mk("housing_opt1_loanDeduction")} indent />
@@ -1159,7 +1346,12 @@ function SimulationTab({ sim, setSim, params, setParams }) {
       <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
         <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 12 }}>
           <div style={{ fontSize: 12.5, color: INK_SOFT, marginBottom: 6 }}>住居プラン</div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {params.housingPlanEnabled && (
+            <div style={{ fontSize: 11.5, color: SUMI, background: SUMI_SOFT, borderRadius: 4, padding: "6px 8px", marginBottom: 8 }}>
+              🧮 費用ウィザードのローン試算プランが有効なため、以下の選択は使われていません。変更するにはウィザードの「住宅」を開いてください。
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", opacity: params.housingPlanEnabled ? 0.4 : 1, pointerEvents: params.housingPlanEnabled ? "none" : "auto" }}>
             {[1, 2, 3, 4].map((v) => (
               <button key={v} onClick={() => setParams((p) => ({ ...p, housingType: v }))}
                 style={{
@@ -2141,7 +2333,7 @@ export default function App() {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed.sim) setSim(parsed.sim);
-        if (parsed.params) setParams(parsed.params);
+        if (parsed.params) setParams({ ...defaultParamsState(), ...parsed.params });
         if (parsed.holdings) setHoldings(parsed.holdings);
         if (parsed.cashList) setCashList(parsed.cashList);
         if (parsed.yearSnapshots) setYearSnapshots(parsed.yearSnapshots);
@@ -2197,7 +2389,7 @@ export default function App() {
         const parsed = JSON.parse(ev.target.result);
         if (!window.confirm("このファイルの内容で、今の編集内容を上書きします。よろしいですか？")) return;
         if (parsed.sim) setSim(parsed.sim);
-        if (parsed.params) setParams(parsed.params);
+        if (parsed.params) setParams({ ...defaultParamsState(), ...parsed.params });
         if (parsed.holdings) setHoldings(parsed.holdings);
         if (parsed.cashList) setCashList(parsed.cashList);
         if (parsed.yearSnapshots) setYearSnapshots(parsed.yearSnapshots);
