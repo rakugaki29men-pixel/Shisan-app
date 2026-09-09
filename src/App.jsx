@@ -2383,6 +2383,19 @@ const THEME_TAGS = [
   "インフレ耐性", "ディフェンシブ", "コア資産", "サテライト資産", "積立中",
 ];
 const TAG_SUGGESTIONS = [...TYPE_TAGS, ...THEME_TAGS];
+// 資産クラスから、既存銘柄と同じ粒度でテーマタグの初期候補を補う
+// （種別タグ1つだけだと新規登録した銘柄だけタグが少なくなってしまうため）
+const STARTER_THEME_TAGS_BY_ASSET_CAT = {
+  "債権": ["ディフェンシブ"],
+  "コモディティ": ["インフレ耐性"],
+  "仮想通貨": ["サテライト資産"],
+  "不動産": ["インフレ耐性"],
+};
+function starterTagsFor(assetCat, instrumentType) {
+  const tags = [instrumentType].filter(Boolean);
+  (STARTER_THEME_TAGS_BY_ASSET_CAT[assetCat] || []).forEach((t) => { if (!tags.includes(t)) tags.push(t); });
+  return tags;
+}
 
 function TagPicker({ tags, onChange, suggestions = TAG_SUGGESTIONS }) {
   const [custom, setCustom] = useState("");
@@ -2503,7 +2516,7 @@ Include up to 3 plausible candidates, best match first. If nothing plausible is 
   };
 
   const pick = async (c) => {
-    setPicked({ ...c, tags: [c.instrumentType].filter(Boolean), subClass: null, memo: "" });
+    setPicked({ ...c, tags: starterTagsFor(c.assetCat, c.instrumentType), subClass: null, memo: "" });
     setQtyInput("1");
     setPriceInput("");
     setPriceNote("");
@@ -2532,7 +2545,7 @@ Include up to 3 plausible candidates, best match first. If nothing plausible is 
   const addManually = () => {
     setPicked({
       name: query.trim() || "新しい銘柄", exchange: "", ticker: "",
-      currency: "JPY", assetCat: "その他", tags: ["個別銘柄"], subClass: null, memo: "",
+      currency: "JPY", assetCat: "その他", tags: starterTagsFor("その他", "個別銘柄"), subClass: null, memo: "",
     });
     setQtyInput("1"); setPriceInput(""); setPriceNote("");
     setError(""); setCandidates(null);
@@ -2623,7 +2636,14 @@ Include up to 3 plausible candidates, best match first. If nothing plausible is 
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
                 <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 3 }}>
                   資産クラス
-                  <select value={picked.assetCat} onChange={(e) => setPicked((p) => ({ ...p, assetCat: e.target.value }))} style={selectStyle}>
+                  <select value={picked.assetCat} onChange={(e) => {
+                    const nextCat = e.target.value;
+                    setPicked((p) => {
+                      const merged = [...(p.tags || [])];
+                      (STARTER_THEME_TAGS_BY_ASSET_CAT[nextCat] || []).forEach((t) => { if (!merged.includes(t)) merged.push(t); });
+                      return { ...p, assetCat: nextCat, tags: merged };
+                    });
+                  }} style={selectStyle}>
                     {ASSET_CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </label>
@@ -3668,12 +3688,11 @@ function LedgerInputTab({ ledger, setLedger, params }) {
     .map((x) => x.e);
 
   const addRow = () => {
-    const firstCat = ledger.categories[0];
     setLedger((prev) => ({
       ...prev,
       entries: [...prev.entries, {
         id: `e_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-        year, month: new Date().getMonth() + 1, categoryId: firstCat?.id || "", amount: 0, memo: "",
+        year, month: "", categoryId: "", amount: 0, memo: "",
       }],
     }));
   };
@@ -3720,46 +3739,47 @@ function LedgerInputTab({ ledger, setLedger, params }) {
           marginBottom: 8, fontSize: 11.5, padding: "7px 12px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`,
           background: "#FFFDF9", color: INK_SOFT, cursor: "pointer",
         }}>＋ 行を追加（一番上に新しい行を入力）</button>
-        <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 5, overflow: "hidden", background: CARD }}>
-          <div style={{ display: "flex", background: INK, color: PAPER, fontSize: 11 }}>
-            <div style={{ width: 52, padding: "6px 4px", textAlign: "center" }}>月</div>
-            <div style={{ flex: "1 1 120px", padding: "6px 6px" }}>費目</div>
-            <div style={{ width: 92, padding: "6px 6px", textAlign: "right" }}>金額</div>
-            <div style={{ flex: "1 1 100px", padding: "6px 6px" }}>メモ</div>
-            <div style={{ width: 22 }} />
-            <div style={{ width: 22 }} />
-          </div>
+        <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 5, background: CARD }}>
           {yearEntries.length === 0 && (
             <div style={{ padding: "14px 10px", fontSize: 12, color: INK_SOFT, textAlign: "center" }}>{year}年の入力はまだありません</div>
           )}
           {yearEntries.map((e, i) => (
-            <div key={e.id} style={{ display: "flex", alignItems: "center", borderBottom: `1px solid ${PAPER_LINE}` }}>
-              <select value={e.month} onChange={(ev) => updateRow(e.id, { month: parseInt(ev.target.value, 10) })}
-                style={{ width: 52, padding: "5px 2px", fontSize: 11.5, border: "none", background: "transparent" }}>
-                {MONTHS.map((m) => <option key={m} value={m}>{m}月</option>)}
-              </select>
-              <select value={e.categoryId} onChange={(ev) => updateRow(e.id, { categoryId: ev.target.value })}
-                style={{ flex: "1 1 120px", padding: "5px 4px", fontSize: 11.5, border: "none", background: "transparent" }}>
-                <optgroup label="支出">
-                  {ledger.categories.filter((c) => c.type === "expense").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </optgroup>
-                <optgroup label="収入">
-                  {ledger.categories.filter((c) => c.type === "income").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </optgroup>
-              </select>
-              <input type="number" value={e.amount} onChange={(ev) => updateRow(e.id, { amount: ev.target.value === "" ? 0 : parseFloat(ev.target.value) })}
-                style={{ width: 92, padding: "5px 6px", fontSize: 11.5, textAlign: "right", border: "none", background: "transparent", fontVariantNumeric: "tabular-nums" }} />
-              <input value={e.memo} onChange={(ev) => updateRow(e.id, { memo: ev.target.value })} placeholder="メモ"
-                style={{ flex: "1 1 100px", padding: "5px 6px", fontSize: 11.5, border: "none", background: "transparent" }} />
-              <div style={{ width: 22, display: "flex", flexDirection: "column" }}>
-                <button onClick={() => moveRow(e.id, "up")} disabled={i === 0} title="上へ移動" style={{
-                  border: "none", background: "transparent", color: i === 0 ? PAPER_LINE : INK_SOFT, fontSize: 10, cursor: i === 0 ? "default" : "pointer", lineHeight: 1, padding: "3px 0",
-                }}>▲</button>
-                <button onClick={() => moveRow(e.id, "down")} disabled={i === yearEntries.length - 1} title="下へ移動" style={{
-                  border: "none", background: "transparent", color: i === yearEntries.length - 1 ? PAPER_LINE : INK_SOFT, fontSize: 10, cursor: i === yearEntries.length - 1 ? "default" : "pointer", lineHeight: 1, padding: "3px 0",
-                }}>▼</button>
+            <div key={e.id} style={{ padding: "8px 8px", borderBottom: `1px solid ${PAPER_LINE}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+                <select value={e.month} onChange={(ev) => updateRow(e.id, { month: ev.target.value === "" ? "" : parseInt(ev.target.value, 10) })}
+                  style={{ flexShrink: 0, width: 58, padding: "4px 2px", fontSize: 12, border: `1px solid ${PAPER_LINE}`, borderRadius: 3, background: "#fff", color: INK }}>
+                  {!e.month && <option value="">月</option>}
+                  {MONTHS.map((m) => <option key={m} value={m}>{m}月</option>)}
+                </select>
+                <select value={e.categoryId} onChange={(ev) => updateRow(e.id, { categoryId: ev.target.value })}
+                  style={{ flex: "1 1 auto", minWidth: 0, padding: "4px 4px", fontSize: 12, border: `1px solid ${PAPER_LINE}`, borderRadius: 3, background: "#fff", color: INK }}>
+                  {!e.categoryId && <option value="">費目を選択</option>}
+                  <optgroup label="支出">
+                    {ledger.categories.filter((c) => c.type === "expense").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </optgroup>
+                  <optgroup label="収入">
+                    {ledger.categories.filter((c) => c.type === "income").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </optgroup>
+                </select>
+                <div style={{ display: "flex", flexShrink: 0 }}>
+                  <button onClick={() => moveRow(e.id, "up")} disabled={i === 0} title="上へ移動" style={{
+                    border: "none", background: "transparent", color: i === 0 ? PAPER_LINE : INK_SOFT, fontSize: 11, cursor: i === 0 ? "default" : "pointer", lineHeight: 1, padding: "0 3px",
+                  }}>▲</button>
+                  <button onClick={() => moveRow(e.id, "down")} disabled={i === yearEntries.length - 1} title="下へ移動" style={{
+                    border: "none", background: "transparent", color: i === yearEntries.length - 1 ? PAPER_LINE : INK_SOFT, fontSize: 11, cursor: i === yearEntries.length - 1 ? "default" : "pointer", lineHeight: 1, padding: "0 3px",
+                  }}>▼</button>
+                </div>
+                <button onClick={() => deleteRow(e.id)} title="削除" style={{ flexShrink: 0, border: "none", background: "transparent", color: SEAL, fontSize: 15, cursor: "pointer", padding: "0 2px" }}>×</button>
               </div>
-              <button onClick={() => deleteRow(e.id)} title="削除" style={{ width: 22, border: "none", background: "transparent", color: SEAL, fontSize: 14, cursor: "pointer" }}>×</button>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
+                  <span style={{ fontSize: 12, color: INK_SOFT }}>¥</span>
+                  <input type="number" value={e.amount} onChange={(ev) => updateRow(e.id, { amount: ev.target.value === "" ? 0 : parseFloat(ev.target.value) })}
+                    style={{ width: 88, textAlign: "right", fontSize: 12.5, padding: "4px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
+                </div>
+                <input value={e.memo} onChange={(ev) => updateRow(e.id, { memo: ev.target.value })} placeholder="メモ"
+                  style={{ flex: 1, minWidth: 0, fontSize: 12, padding: "4px 6px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3 }} />
+              </div>
             </div>
           ))}
         </div>
