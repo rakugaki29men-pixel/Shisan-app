@@ -2511,6 +2511,46 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
    ============================================================ */
 const PIE_PALETTE = [GOLD, SUMI, "#5B7FA6", SEAL, "#8E6BA6", "#C77B4F", "#6B9B6E", "#8FA6C7", "#5CA0A0", "#8A8577"];
 
+/* 円グラフのラベルが密集する小さい扇形どうしで重ならないよう、
+   同じ側（左/右）に置いた既存の全ラベルとの距離を見て縦にずらしながら
+   引き出し線（本体→折れ点→ラベル）を描く */
+function renderPieLeaderLabel() {
+  const placed = { left: [], right: [] };
+  const MIN_GAP = 16;
+  return (props) => {
+    const { cx, cy, midAngle, outerRadius, percent, name, index } = props;
+    if (!percent || percent < 0.001) return null;
+    const RADIAN = Math.PI / 180;
+    const cos = Math.cos(-RADIAN * midAngle);
+    const sin = Math.sin(-RADIAN * midAngle);
+    const sx = cx + outerRadius * cos;
+    const sy = cy + outerRadius * sin;
+    const bendR = outerRadius + 14;
+    const mx = cx + bendR * cos;
+    let my = cy + bendR * sin;
+    const isRight = cos >= 0;
+    const arr = placed[isRight ? "right" : "left"];
+    // 同じ側の直前のラベルより下にしか押し出さない一方向の調整なので、
+    // 何度比較しても必ず収束する（往復して固まることがない）
+    if (arr.length && my - arr[arr.length - 1] < MIN_GAP) {
+      my = arr[arr.length - 1] + MIN_GAP;
+    }
+    arr.push(my);
+    const legLen = 16;
+    const ex = mx + (isRight ? legLen : -legLen);
+    const color = PIE_PALETTE[index % PIE_PALETTE.length];
+    const pct = `${(percent * 100).toFixed(percent < 0.03 ? 1 : 0)}%`;
+    return (
+      <g key={`pie-label-${name}`}>
+        <path d={`M${sx},${sy} L${mx},${my} L${ex},${my}`} stroke={INK_SOFT} strokeWidth={1} fill="none" />
+        <text x={ex + (isRight ? 4 : -4)} y={my} textAnchor={isRight ? "start" : "end"} dominantBaseline="middle" fontSize={11} fontWeight={600} fill={color}>
+          {name} {pct}
+        </text>
+      </g>
+    );
+  };
+}
+
 function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, yearSnapshots, setYearSnapshots }) {
   const totalCash = cashList.reduce((s, c) => s + (c.amount || 0), 0);
   const model = useMemo(() => computeModel(sim, params), [sim, params]);
@@ -2659,10 +2699,10 @@ function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, 
         <RealEstateToggle params={params} setParams={setParams} />
       </div>
 
-      <div style={{ padding: "0 16px", height: 260, background: CARD }}>
+      <div style={{ padding: "0 16px", height: 320, background: CARD }}>
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
-            <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={85} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
+            <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={62} label={renderPieLeaderLabel()} labelLine={false} isAnimationActive={false}>
               {pieData.map((_, i) => <Cell key={i} fill={PIE_PALETTE[i % PIE_PALETTE.length]} />)}
             </Pie>
             <Tooltip formatter={(v) => fmtYen(v)} contentStyle={{ fontSize: 12 }} />
@@ -2685,10 +2725,13 @@ function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, 
         <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 5, overflow: "hidden", background: CARD }}>
           {subRows.map(([k, v], i) => (
             <div key={k} style={{
-              display: "flex", justifyContent: "space-between", padding: "8px 12px",
+              display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px",
               borderBottom: i < subRows.length - 1 ? `1px solid ${PAPER_LINE}` : "none", fontSize: 12.5,
             }}>
-              <span style={{ color: INK }}>{k}</span>
+              <span style={{ color: INK, display: "flex", alignItems: "center", gap: 7 }}>
+                <span style={{ width: 10, height: 10, borderRadius: "50%", background: PIE_PALETTE[i % PIE_PALETTE.length], flexShrink: 0 }} />
+                {k}
+              </span>
               <span style={{ fontWeight: 600, color: INK, fontVariantNumeric: "tabular-nums" }}>{fmtYen(v)} <span style={{ color: INK_SOFT, fontWeight: 400 }}>（{fmt((v / total) * 100, 1)}%）</span></span>
             </div>
           ))}
