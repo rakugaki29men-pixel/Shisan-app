@@ -164,6 +164,7 @@ function defaultParamsState() {
     cash0: RAW.init.cash0,
     fxRate: RAW.portfolio.usdjpy || 150,
     simStartYear: RAW.sim.years[0],
+    wageGrowthRate: 0,
     downPayment: 0,
     housingSubsidyAnnual: 0,
     housingPlanEnabled: false,
@@ -1473,8 +1474,15 @@ function SheetTab({ sim, setSim, params, setParams, family, setFamily }) {
           body * { visibility: hidden; }
           .sheet-print-target, .sheet-print-target * { visibility: visible; }
           .sheet-print-target { position: absolute; left: 0; top: 0; width: 100%; }
+          .sheet-print-target * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           .sheet-scroll-container { max-height: none !important; overflow: visible !important; }
-          @page { size: A3 landscape; margin: 8mm; }
+          .sheet-print-target div { position: static !important; }
+          .sheet-print-header { display: block !important; }
+          .sheet-print-target input {
+            border: none !important; border-radius: 0 !important; background: transparent !important;
+            padding: 4px 2px !important; -webkit-appearance: none;
+          }
+          @page { size: A3 landscape; margin: 10mm; }
         }
       `}</style>
       <div style={{ padding: "0 16px 4px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -1485,6 +1493,12 @@ function SheetTab({ sim, setSim, params, setParams, family, setFamily }) {
         }}>🖨 PDFとして保存</button>
       </div>
       <div className="sheet-print-target" style={{ padding: "0 16px 16px" }}>
+        <div className="sheet-print-header" style={{ display: "none", marginBottom: 10 }}>
+          <div style={{ fontFamily: "'Shippori Mincho','Noto Serif JP',serif", fontSize: 20, color: INK }}>ライフポートフォリオ</div>
+          <div style={{ fontSize: 12, color: INK_SOFT, marginTop: 2 }}>
+            資産・収支シミュレーション　全体シート（{YEARS[0]}〜{YEARS[N - 1]}年）　作成日：{new Date().toLocaleDateString("ja-JP")}
+          </div>
+        </div>
         <div className="sheet-scroll-container" style={{ overflow: "auto", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, maxHeight: "70vh" }}>
           <div style={{ minWidth: 128 + N * 82 }}>
             <SheetYearHeader />
@@ -1637,6 +1651,69 @@ function StartYearControl({ sim, setSim, params, setParams }) {
   );
 }
 
+// 直近（最大5年分）の前年比の平均を実績データから計算する（0や未入力の年はスキップ）
+function computeRecentGrowthRate(arr, currentIdx) {
+  const samples = [];
+  for (let i = Math.max(1, currentIdx - 5); i <= currentIdx && i < arr.length; i++) {
+    const prev = arr[i - 1], cur = arr[i];
+    if (prev > 0 && cur > 0) samples.push(cur / prev - 1);
+  }
+  if (samples.length === 0) return null;
+  return samples.reduce((a, b) => a + b, 0) / samples.length;
+}
+
+function WageGrowthControl({ sim, setSim, params, setParams }) {
+  const [note, setNote] = useState("");
+  const currentYear = new Date().getFullYear();
+  const currentIdx = Math.min(Math.max(currentYear - YEARS[0], 0), N - 1);
+  const avgFather = computeRecentGrowthRate(sim.income.father, currentIdx);
+  const avgMother = computeRecentGrowthRate(sim.income.mother, currentIdx);
+  const fmtPct = (r) => (r == null ? "—" : `${(r * 100).toFixed(1)}%`);
+
+  const apply = () => {
+    const rate = params.wageGrowthRate || 0;
+    if (!rate) { window.alert("上昇率が0%のままです。反映しても数値は変わりません。"); return; }
+    const ok = window.confirm(
+      `${currentYear}年の金額を基準に、${currentYear + 1}年以降の父・母の収入へ年${(rate * 100).toFixed(1)}%の上昇率を複利で反映します。\n` +
+      `${currentYear + 1}年以降にすでに入力済みの金額は上書きされます。よろしいですか？`
+    );
+    if (!ok) return;
+    setSim((prev) => {
+      const next = clone(prev);
+      ["father", "mother"].forEach((key) => {
+        const arr = next.income[key];
+        const base = arr[currentIdx];
+        if (!base) return;
+        for (let i = currentIdx + 1; i < N; i++) {
+          arr[i] = Math.round(base * Math.pow(1 + rate, i - currentIdx) * 10) / 10;
+        }
+      });
+      return next;
+    });
+    setNote(`${currentYear + 1}年以降の父・母の収入に反映しました。`);
+    setTimeout(() => setNote(""), 4000);
+  };
+
+  return (
+    <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 12 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <ParamField label="賃金上昇率（年率）" value={params.wageGrowthRate * 100} suffix="%"
+          onChange={(v) => setParams((p) => ({ ...p, wageGrowthRate: v / 100 }))} />
+        <button onClick={apply} style={{ fontSize: 11.5, padding: "8px 12px", borderRadius: 4, border: "none", background: GOLD, color: "#fff", cursor: "pointer", whiteSpace: "nowrap" }}>
+          {currentYear + 1}年以降の収入に反映
+        </button>
+      </div>
+      <div style={{ fontSize: 10.5, color: INK_SOFT, marginTop: 8 }}>
+        参考：直近の実績から見た平均上昇率　父 {fmtPct(avgFather)} ／ 母 {fmtPct(avgMother)}
+      </div>
+      <div style={{ fontSize: 10.5, color: INK_SOFT, marginTop: 4 }}>
+        「反映」を押すと、{currentYear}年の金額を基準にこの上昇率で複利計算し、{currentYear + 1}年以降の父・母の収入欄に自動入力します（すでに入力済みの値は上書きされます）。
+      </div>
+      {note && <div style={{ fontSize: 11.5, color: SUMI, marginTop: 6 }}>{note}</div>}
+    </div>
+  );
+}
+
 const settingsBtnStyle = {
   fontSize: 11.5, padding: "7px 11px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`,
   background: CARD, color: INK, cursor: "pointer", whiteSpace: "nowrap",
@@ -1713,6 +1790,10 @@ function SettingsModal({ sim, setSim, params, setParams, onOpenFamily, onOpenWiz
                 onChange={(v) => setParams((p) => ({ ...p, cash0: v }))} />
             </div>
           </div>
+        </SettingsSection>
+
+        <SettingsSection title="賃金上昇率">
+          <WageGrowthControl sim={sim} setSim={setSim} params={params} setParams={setParams} />
         </SettingsSection>
 
         <SettingsSection title="データの管理">
@@ -2525,7 +2606,7 @@ function renderPieLeaderLabel() {
     const sin = Math.sin(-RADIAN * midAngle);
     const sx = cx + outerRadius * cos;
     const sy = cy + outerRadius * sin;
-    const bendR = outerRadius + 14;
+    const bendR = outerRadius + 10;
     const mx = cx + bendR * cos;
     let my = cy + bendR * sin;
     const isRight = cos >= 0;
@@ -2536,14 +2617,14 @@ function renderPieLeaderLabel() {
       my = arr[arr.length - 1] + MIN_GAP;
     }
     arr.push(my);
-    const legLen = 16;
+    const legLen = 10;
     const ex = mx + (isRight ? legLen : -legLen);
     const color = PIE_PALETTE[index % PIE_PALETTE.length];
     const pct = `${(percent * 100).toFixed(percent < 0.03 ? 1 : 0)}%`;
     return (
       <g key={`pie-label-${name}`}>
         <path d={`M${sx},${sy} L${mx},${my} L${ex},${my}`} stroke={INK_SOFT} strokeWidth={1} fill="none" />
-        <text x={ex + (isRight ? 4 : -4)} y={my} textAnchor={isRight ? "start" : "end"} dominantBaseline="middle" fontSize={11} fontWeight={600} fill={color}>
+        <text x={ex + (isRight ? 3 : -3)} y={my} textAnchor={isRight ? "start" : "end"} dominantBaseline="middle" fontSize={10.5} fontWeight={600} fill={color}>
           {name} {pct}
         </text>
       </g>
@@ -2699,10 +2780,10 @@ function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, 
         <RealEstateToggle params={params} setParams={setParams} />
       </div>
 
-      <div style={{ padding: "0 16px", height: 320, background: CARD }}>
+      <div style={{ padding: "0 16px", height: 360, background: CARD }}>
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
-            <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={62} label={renderPieLeaderLabel()} labelLine={false} isAnimationActive={false}>
+            <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={74} label={renderPieLeaderLabel()} labelLine={false} isAnimationActive={false}>
               {pieData.map((_, i) => <Cell key={i} fill={PIE_PALETTE[i % PIE_PALETTE.length]} />)}
             </Pie>
             <Tooltip formatter={(v) => fmtYen(v)} contentStyle={{ fontSize: 12 }} />
@@ -2830,7 +2911,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `kakeibo_backup_${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `lifeportfolio_backup_${new Date().toISOString().slice(0, 10)}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -2865,7 +2946,7 @@ export default function App() {
     <div style={{ fontFamily: "'Noto Sans JP','Hiragino Sans',sans-serif", background: PAPER, minHeight: "100%", color: INK }}>
       <div style={{ background: INK, color: PAPER, padding: "14px 16px 10px", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
-          <div style={{ fontFamily: "'Shippori Mincho','Noto Serif JP',serif", fontSize: 18, letterSpacing: "0.06em" }}>家計シミュレーション帳</div>
+          <div style={{ fontFamily: "'Shippori Mincho','Noto Serif JP',serif", fontSize: 18, letterSpacing: "0.06em" }}>ライフポートフォリオ</div>
           <div style={{ fontSize: 10.5, color: "#AEB9CC", marginTop: 2 }}>{YEARS[0]}–{YEARS[N - 1]} 年 資産・収支プラン</div>
         </div>
         <button onClick={() => setShowSettings(true)} aria-label="設定" style={{
