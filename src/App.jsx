@@ -37,10 +37,33 @@ const CAT_COLORS = {
   sudden: "#B5372A",
 };
 
-const YEARS = RAW.sim.years;
+// YEARS は「開始年」変更時にその場で書き換える（中身を差し替えるだけで、
+// 期間の長さ N は常に固定。以後 YEARS を読むコードはすべて新しい年に追従する）
+let YEARS = [...RAW.sim.years];
 const N = YEARS.length;
 const zeros = () => new Array(N).fill(0);
 const clone = (o) => JSON.parse(JSON.stringify(o));
+
+/* 開始年の変更にあわせて、実年に紐づく年別配列（学費・収入など）だけを
+   シフトする。家族メモ・住宅ローン金利の上書き・年次スナップショットは
+   もともと実年（西暦）をキーにしたオブジェクトなので触らなくてよい。 */
+function shiftYearArrays(node, shift) {
+  if (Array.isArray(node)) {
+    if (node.length !== N) return node;
+    const shifted = zeros();
+    for (let i = 0; i < N; i++) {
+      const srcIdx = i + shift;
+      shifted[i] = srcIdx >= 0 && srcIdx < N ? (node[srcIdx] ?? 0) : 0;
+    }
+    return shifted;
+  }
+  if (node && typeof node === "object") {
+    const out = {};
+    for (const k of Object.keys(node)) out[k] = shiftYearArrays(node[k], shift);
+    return out;
+  }
+  return node;
+}
 function fillForward(arr, i, v) {
   for (let k = i; k < arr.length; k++) arr[k] = v;
 }
@@ -140,6 +163,7 @@ function defaultParamsState() {
     securities0: RAW.init.securities0,
     cash0: RAW.init.cash0,
     fxRate: RAW.portfolio.usdjpy || 150,
+    simStartYear: RAW.sim.years[0],
     downPayment: 0,
     housingSubsidyAnnual: 0,
     housingPlanEnabled: false,
@@ -278,66 +302,32 @@ function computeHousingPlan(params) {
   const housingCost = zeros(), loanBalance = zeros(), realEstateAsset = zeros(), rateArr = zeros();
   const purchaseIdx = YEARS.indexOf(params.housingPlanPurchaseYear);
   const moveIdx = params.housingPlanMoveEnabled ? YEARS.indexOf(params.housingPlanMoveYear) : -1;
+  // 開始年より前に購入している場合、購入年の実インデックスは負になる
+  // （＝一覧には出ない過去の年から、途中経過のローン残高で始まる）
+  const purchaseIdxReal = (params.housingPlanPurchaseYear ?? YEARS[0]) - YEARS[0];
   let regime = null;
+  let prevBal = 0, prevRate = 0;
 
-  const startBuyRegime = (i, price, downPayment, rate, rateIncrease, rateCap, mode, term, otherAnnual, overrides, oneTimeCashEffect) => {
-    regime = { type: "buy", startIdx: i, price, rateIncrease: rateIncrease || 0, rateCap: rateCap || 1, mode, term, otherAnnual: otherAnnual || 0, overrides: overrides || {} };
-    const initialRate = Math.min(regime.rateCap, regime.overrides[YEARS[i]] ?? (rate || 0));
-    rateArr[i] = initialRate;
-    loanBalance[i] = Math.max(0, (price || 0) - (downPayment || 0));
-    regime.fixedPayment = calcAnnuityPayment(loanBalance[i], initialRate, term || 1);
-    housingCost[i] = regime.fixedPayment + regime.otherAnnual + (oneTimeCashEffect || 0);
-    realEstateAsset[i] = params.includeRealEstate ? (price || 0) - loanBalance[i] : 0;
+  const startBuyRegime = (startIdx, price, downPayment, rate, rateIncrease, rateCap, mode, term, otherAnnual, overrides) => {
+    regime = { type: "buy", startIdx, price, rateIncrease: rateIncrease || 0, rateCap: rateCap || 1, mode, term, otherAnnual: otherAnnual || 0, overrides: overrides || {} };
+    prevBal = Math.max(0, (price || 0) - (downPayment || 0));
+    prevRate = Math.min(regime.rateCap, regime.overrides[YEARS[0] + startIdx] ?? (rate || 0));
+    regime.fixedPayment = calcAnnuityPayment(prevBal, prevRate, term || 1);
   };
-
-  const startRentRegime = (i, rentMonthly, rentEscalation, otherAnnual, oneTimeCashEffect) => {
-    regime = { type: "rent", startIdx: i, rentAnnual: (rentMonthly || 0) * 12, rentEscalation: rentEscalation || 0, otherAnnual: otherAnnual || 0 };
-    loanBalance[i] = 0;
-    rateArr[i] = 0;
-    housingCost[i] = regime.rentAnnual + regime.otherAnnual + (oneTimeCashEffect || 0);
-    realEstateAsset[i] = 0;
+  const startRentRegime = (startIdx, rentMonthly, rentEscalation, otherAnnual) => {
+    regime = { type: "rent", startIdx, rentAnnual: (rentMonthly || 0) * 12, rentEscalation: rentEscalation || 0, otherAnnual: otherAnnual || 0 };
+    prevBal = 0; prevRate = 0;
   };
-
-  for (let i = 0; i < N; i++) {
-    if (i === purchaseIdx) {
-      if (params.housingPlanAcquisitionType === "rent") {
-        startRentRegime(i, params.housingPlanRentMonthly, params.housingPlanRentEscalation, params.housingPlanOtherAnnual, 0);
-      } else {
-        startBuyRegime(i, params.housingPlanPrice, params.housingPlanDownPayment, params.housingPlanRate,
-          params.housingPlanRateIncrease, params.housingPlanRateCap, params.housingPlanRepaymentMode, params.housingPlanTermYears,
-          params.housingPlanOtherAnnual, params.housingPlanRateOverrides, 0);
-      }
-      continue;
-    }
-    if (i === moveIdx) {
-      const saleProceeds = params.housingPlanAcquisitionType === "rent" ? 0 : (params.housingPlanMoveSaleProceeds || 0);
-      if (params.housingPlanMoveAcquisitionType === "rent") {
-        const cashEffect = -saleProceeds;
-        startRentRegime(i, params.housingPlanMoveRentMonthly, params.housingPlanMoveRentEscalation, params.housingPlanMoveOtherAnnual, cashEffect);
-      } else {
-        const cashEffect = (params.housingPlanMoveDownPayment || 0) - saleProceeds;
-        startBuyRegime(i, params.housingPlanMovePrice, params.housingPlanMoveDownPayment, params.housingPlanMoveRate,
-          params.housingPlanMoveRateIncrease, params.housingPlanMoveRateCap, params.housingPlanMoveRepaymentMode, params.housingPlanMoveTermYears,
-          params.housingPlanMoveOtherAnnual, params.housingPlanMoveRateOverrides, cashEffect);
-      }
-      continue;
-    }
-    if (!regime || i < regime.startIdx) continue;
+  // 1年分、残高・金利を進める（表示範囲外の「助走」計算にも使う）
+  const advanceStep = (i) => {
     const yrsSince = i - regime.startIdx;
-
     if (regime.type === "rent") {
-      housingCost[i] = regime.rentAnnual * Math.pow(1 + regime.rentEscalation, yrsSince) + regime.otherAnnual;
-      loanBalance[i] = 0;
-      realEstateAsset[i] = 0;
-      rateArr[i] = 0;
-      continue;
+      prevBal = 0; prevRate = 0;
+      return regime.rentAnnual * Math.pow(1 + regime.rentEscalation, yrsSince) + regime.otherAnnual;
     }
-
-    const hasOverride = regime.overrides[YEARS[i]] !== undefined;
-    const naturalRate = regime.mode === "variable" ? rateArr[i - 1] + regime.rateIncrease : rateArr[i - 1];
-    const currentRate = Math.min(regime.rateCap, hasOverride ? regime.overrides[YEARS[i]] : naturalRate);
-    rateArr[i] = currentRate;
-    const prevBal = loanBalance[i - 1];
+    const hasOverride = regime.overrides[YEARS[0] + i] !== undefined;
+    const naturalRate = regime.mode === "variable" ? prevRate + regime.rateIncrease : prevRate;
+    const currentRate = Math.min(regime.rateCap, hasOverride ? regime.overrides[YEARS[0] + i] : naturalRate);
     const interest = prevBal * currentRate;
     if (regime.mode === "fixed" && hasOverride) {
       regime.fixedPayment = calcAnnuityPayment(prevBal, currentRate, Math.max(1, regime.term - yrsSince));
@@ -345,9 +335,57 @@ function computeHousingPlan(params) {
     const payment = regime.mode === "variable"
       ? calcAnnuityPayment(prevBal, currentRate, Math.max(1, regime.term - yrsSince))
       : regime.fixedPayment;
-    loanBalance[i] = Math.max(0, prevBal - (payment - interest));
-    housingCost[i] = payment + regime.otherAnnual;
-    realEstateAsset[i] = params.includeRealEstate ? regime.price - loanBalance[i] : 0;
+    const nextBal = Math.max(0, prevBal - (payment - interest));
+    prevRate = currentRate;
+    prevBal = nextBal;
+    return payment + regime.otherAnnual;
+  };
+
+  if (params.housingPlanAcquisitionType !== "rent" && purchaseIdxReal < 0) {
+    startBuyRegime(purchaseIdxReal, params.housingPlanPrice, params.housingPlanDownPayment, params.housingPlanRate,
+      params.housingPlanRateIncrease, params.housingPlanRateCap, params.housingPlanRepaymentMode, params.housingPlanTermYears,
+      params.housingPlanOtherAnnual, params.housingPlanRateOverrides);
+    for (let vi = purchaseIdxReal + 1; vi < 0; vi++) advanceStep(vi);
+  }
+
+  for (let i = 0; i < N; i++) {
+    if (i === purchaseIdx) {
+      if (params.housingPlanAcquisitionType === "rent") {
+        startRentRegime(i, params.housingPlanRentMonthly, params.housingPlanRentEscalation, params.housingPlanOtherAnnual);
+      } else {
+        startBuyRegime(i, params.housingPlanPrice, params.housingPlanDownPayment, params.housingPlanRate,
+          params.housingPlanRateIncrease, params.housingPlanRateCap, params.housingPlanRepaymentMode, params.housingPlanTermYears,
+          params.housingPlanOtherAnnual, params.housingPlanRateOverrides);
+      }
+      loanBalance[i] = prevBal;
+      rateArr[i] = prevRate;
+      housingCost[i] = (regime.type === "rent" ? regime.rentAnnual : regime.fixedPayment) + regime.otherAnnual;
+      realEstateAsset[i] = params.includeRealEstate ? (regime.price || 0) - prevBal : 0;
+      continue;
+    }
+    if (i === moveIdx) {
+      const saleProceeds = params.housingPlanAcquisitionType === "rent" ? 0 : (params.housingPlanMoveSaleProceeds || 0);
+      let cashEffect;
+      if (params.housingPlanMoveAcquisitionType === "rent") {
+        cashEffect = -saleProceeds;
+        startRentRegime(i, params.housingPlanMoveRentMonthly, params.housingPlanMoveRentEscalation, params.housingPlanMoveOtherAnnual);
+      } else {
+        cashEffect = (params.housingPlanMoveDownPayment || 0) - saleProceeds;
+        startBuyRegime(i, params.housingPlanMovePrice, params.housingPlanMoveDownPayment, params.housingPlanMoveRate,
+          params.housingPlanMoveRateIncrease, params.housingPlanMoveRateCap, params.housingPlanMoveRepaymentMode, params.housingPlanMoveTermYears,
+          params.housingPlanMoveOtherAnnual, params.housingPlanMoveRateOverrides);
+      }
+      loanBalance[i] = prevBal;
+      rateArr[i] = prevRate;
+      housingCost[i] = (regime.type === "rent" ? regime.rentAnnual : regime.fixedPayment) + regime.otherAnnual + cashEffect;
+      realEstateAsset[i] = params.includeRealEstate ? (regime.price || 0) - prevBal : 0;
+      continue;
+    }
+    if (!regime || i < regime.startIdx) continue;
+    housingCost[i] = advanceStep(i);
+    loanBalance[i] = prevBal;
+    rateArr[i] = prevRate;
+    realEstateAsset[i] = params.includeRealEstate ? (regime.price || 0) - prevBal : 0;
   }
   return { housingCost, loanBalance, realEstateAsset, rateArr };
 }
@@ -366,7 +404,21 @@ function computeModel(sim, params) {
   const buildingVal = zeros(), landVal = zeros(), saleEstimate = zeros();
   let realEstateAsset = zeros();
 
-  const houseStartIdx = 1;
+  // この既定シナリオの購入年は実年2021年に固定（開始年を変えても購入年自体は動かない）。
+  // 開始年を2021年より後にずらすと購入時点が表示範囲外になるため、その場合は
+  // 表示範囲の最初の年の返済額がずっと続いていたとみなして残高を簡易的に遡り計算する。
+  const HOUSE_PURCHASE_YEAR = 2021;
+  const houseStartIdx = HOUSE_PURCHASE_YEAR - YEARS[0];
+  let houseWarmBal = Math.max(0, params.loanInitial - (params.downPayment || 0));
+  if (houseStartIdx < 0) {
+    const approxPayment = exp.housing_opt1_loanPayment[0] ?? 0;
+    // i===0（配列の最初の可視年）でさらに1回分の返済が適用されるため、
+    // ここでは「最初の可視年の前年末時点」まで（1回少なく）進めておく
+    for (let vi = houseStartIdx; vi < -1; vi++) {
+      const interest = houseWarmBal * params.loanRate;
+      houseWarmBal = Math.max(0, houseWarmBal - (approxPayment - interest));
+    }
+  }
   const AMORT_YEARS = 22;
   const housingPlan = params.housingPlanEnabled ? computeHousingPlan(params) : null;
   if (housingPlan) {
@@ -397,7 +449,7 @@ function computeModel(sim, params) {
         loanBalance[i] = Math.max(0, params.loanInitial - (params.downPayment || 0));
         loanInterest[i] = 0;
       } else if (i > houseStartIdx) {
-        const prevBal = loanBalance[i - 1];
+        const prevBal = i === 0 ? houseWarmBal : loanBalance[i - 1];
         loanInterest[i] = prevBal * params.loanRate;
         const payment = exp.housing_opt1_loanPayment[i] ?? 0;
         loanBalance[i] = Math.max(0, prevBal - (payment - loanInterest[i]));
@@ -1539,6 +1591,52 @@ function SheetTab({ sim, setSim, params, setParams, family, setFamily }) {
   );
 }
 
+function StartYearControl({ sim, setSim, params, setParams }) {
+  const [input, setInput] = useState(String(params.simStartYear));
+  const [note, setNote] = useState("");
+
+  const apply = () => {
+    const newStart = parseInt(input, 10);
+    if (!Number.isFinite(newStart)) return;
+    const shift = newStart - YEARS[0];
+    if (shift === 0) return;
+    const oldEnd = YEARS[0] + N - 1;
+    const newEnd = newStart + N - 1;
+    const lostRange = shift > 0 ? `${YEARS[0]}〜${Math.min(newStart - 1, oldEnd)}年` : `${Math.max(newStart, oldEnd + 1)}〜${oldEnd}年`;
+    const ok = window.confirm(
+      `シミュレーションの期間を${YEARS[0]}〜${oldEnd}年から${newStart}〜${newEnd}年に変更します（期間の長さは${N}年間のまま）。\n` +
+      `実際の年（西暦）に紐づいたデータはそのままついてきますが、新しい期間から外れる${lostRange}のデータは失われます。元に戻しても復元されません。よろしいですか？`
+    );
+    if (!ok) return;
+    const shiftedExpense = shiftYearArrays(sim.expense, shift);
+    const shiftedIncome = shiftYearArrays(sim.income, shift);
+    YEARS.splice(0, YEARS.length, ...Array.from({ length: N }, (_, i) => newStart + i));
+    setSim((prev) => ({ ...prev, expense: shiftedExpense, income: shiftedIncome }));
+    setParams((p) => ({ ...p, simStartYear: newStart }));
+    setNote(`${newStart}年〜${newStart + N - 1}年に変更しました。`);
+    setTimeout(() => setNote(""), 4000);
+  };
+
+  return (
+    <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 12 }}>
+      <div style={{ fontSize: 12.5, color: INK_SOFT, marginBottom: 6 }}>シミュレーション期間（{N}年間・固定）</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <label style={{ fontSize: 11.5, display: "flex", flexDirection: "column", gap: 3 }}>
+          開始年
+          <input type="number" value={input} onChange={(e) => setInput(e.target.value)}
+            style={{ width: 90, padding: "5px 7px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, fontVariantNumeric: "tabular-nums" }} />
+        </label>
+        <div style={{ fontSize: 12, color: INK_SOFT }}>〜 {(parseInt(input, 10) || YEARS[0]) + N - 1}年</div>
+        <button onClick={apply} style={{ fontSize: 12, padding: "6px 12px", borderRadius: 4, border: "none", background: GOLD, color: "#fff", cursor: "pointer" }}>適用</button>
+      </div>
+      <div style={{ fontSize: 10.5, color: INK_SOFT, marginTop: 6 }}>
+        開始年を変えると、学費・支出などの各年のデータは実際の年（西暦）に紐づいたまま一緒に移動します。ただし新しい期間から外れる年のデータは失われるのでご注意ください（住宅ローン・家族の生年・保有銘柄などは年に依存しないのでそのまま残ります）。
+      </div>
+      {note && <div style={{ fontSize: 11.5, color: SUMI, marginTop: 6 }}>{note}</div>}
+    </div>
+  );
+}
+
 function SimulationTab({ sim, setSim, params, setParams, onOpenWizard, onOpenSheet }) {
   const model = useMemo(() => computeModel(sim, params), [sim, params]);
 
@@ -1621,6 +1719,7 @@ function SimulationTab({ sim, setSim, params, setParams, onOpenWizard, onOpenShe
 
       <SectionHeader title="前提条件（グローバル設定）" />
       <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+        <StartYearControl sim={sim} setSim={setSim} params={params} setParams={setParams} />
         <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 12 }}>
           <div style={{ fontSize: 12.5, color: INK_SOFT, marginBottom: 6 }}>住居プラン</div>
           {params.housingPlanEnabled && (
@@ -1650,9 +1749,9 @@ function SimulationTab({ sim, setSim, params, setParams, onOpenWizard, onOpenShe
             note={params.housingPlanEnabled ? "住宅ウィザードの金利を使用中" : undefined} />
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <ParamField label="初期金融資産(2020)" value={params.securities0} suffix="万円"
+          <ParamField label={`初期金融資産(${YEARS[0]})`} value={params.securities0} suffix="万円"
             onChange={(v) => setParams((p) => ({ ...p, securities0: v }))} />
-          <ParamField label="初期現金(2020)" value={params.cash0} suffix="万円"
+          <ParamField label={`初期現金(${YEARS[0]})`} value={params.cash0} suffix="万円"
             onChange={(v) => setParams((p) => ({ ...p, cash0: v }))} />
         </div>
       </div>
