@@ -112,7 +112,27 @@ function migrateLedgerLinks(ledger) {
 }
 
 function defaultSimState() { return migrateSimFoodFields({ ...clone(RAW.sim), wizardTouched: [] }); }
-function defaultPortfolioState() { return clone(RAW.portfolio.holdings); }
+
+// 種別（個別銘柄／ETF／投信／仮想通貨）を単独フィールドではなく複数タグの1つとして扱い、
+// 株式・コモディティ・債権に分かれていたサブ分類を単一のsubClassにまとめ、
+// 仮想通貨を「コモディティ」の一種ではなく独立した資産クラスに引き上げる移行処理
+function migrateHoldingFields(holdings) {
+  if (!Array.isArray(holdings)) return holdings;
+  return holdings.map((h) => {
+    if (h.tags) return h;
+    let assetCat = h.assetCat === "ｺﾓﾃﾞｨﾃｨ" ? "コモディティ" : (h.assetCat || "その他");
+    let subClass = h.subClass ?? (h.stockType || h.commodityType || h.bondType || null);
+    if (assetCat === "コモディティ" && (subClass === "仮想通貨" || h.instrumentType === "仮想通貨")) {
+      assetCat = "仮想通貨";
+      subClass = null;
+    }
+    const tags = [h.instrumentType].filter(Boolean);
+    const { stockType, commodityType, bondType, instrumentType, ...rest } = h;
+    return { ...rest, assetCat, subClass, tags, memo: h.memo ?? "" };
+  });
+}
+
+function defaultPortfolioState() { return migrateHoldingFields(clone(RAW.portfolio.holdings)); }
 function defaultCashState() { return clone(RAW.cash); }
 
 function defaultFamilyState() {
@@ -2203,6 +2223,68 @@ function FamilySetupModal({ family, setFamily, onClose }) {
   );
 }
 
+const ASSET_CLASSES = ["株式", "債権", "コモディティ", "仮想通貨", "不動産", "その他"];
+const SUBCLASS_SUGGESTIONS = {
+  "株式": ["米国株式", "先進国株式", "日本株式", "新興国株式"],
+  "債権": ["米国債", "先進国債券", "日本国債", "社債", "新興国債券"],
+  "コモディティ": ["貴金属", "エネルギー", "農作物", "その他コモディティ"],
+  "仮想通貨": ["ビットコイン", "アルトコイン", "ステーブルコイン"],
+  "不動産": ["自宅", "投資用不動産", "REIT"],
+};
+const TYPE_TAGS = ["個別銘柄", "ETF", "投信", "仮想通貨"];
+const THEME_TAGS = [
+  "高配当", "連続増配", "低ボラ", "グロース", "バリュー", "AI関連", "ハイテク",
+  "インフレ耐性", "ディフェンシブ", "コア資産", "サテライト資産", "積立中",
+];
+const TAG_SUGGESTIONS = [...TYPE_TAGS, ...THEME_TAGS];
+
+function TagPicker({ tags, onChange, suggestions = TAG_SUGGESTIONS }) {
+  const [custom, setCustom] = useState("");
+  const toggle = (t) => onChange(tags.includes(t) ? tags.filter((x) => x !== t) : [...tags, t]);
+  const addCustom = () => {
+    const t = custom.trim();
+    if (t && !tags.includes(t)) onChange([...tags, t]);
+    setCustom("");
+  };
+  const extra = tags.filter((t) => !suggestions.includes(t));
+  return (
+    <div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+        {[...suggestions, ...extra].map((t) => (
+          <button key={t} type="button" onClick={() => toggle(t)} style={{
+            fontSize: 11, padding: "4px 9px", borderRadius: 12, cursor: "pointer",
+            border: `1px solid ${tags.includes(t) ? GOLD : PAPER_LINE}`,
+            background: tags.includes(t) ? GOLD_SOFT : "#fff", color: INK,
+          }}>{t}</button>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+        <input value={custom} onChange={(e) => setCustom(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCustom(); } }}
+          placeholder="タグを追加（自由入力）"
+          style={{ flex: 1, fontSize: 11, padding: "4px 7px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3 }} />
+        <button type="button" onClick={addCustom} style={{
+          fontSize: 11, padding: "4px 9px", borderRadius: 3, border: `1px solid ${PAPER_LINE}`, background: "#FFFDF9", color: INK_SOFT, cursor: "pointer",
+        }}>＋追加</button>
+      </div>
+    </div>
+  );
+}
+
+function SubClassField({ assetCat, value, onChange }) {
+  const listId = "subclass-suggestions";
+  return (
+    <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 3 }}>
+      サブクラス
+      <input list={listId} value={value || ""} onChange={(e) => onChange(e.target.value || null)}
+        placeholder="例：米国株式" style={{ fontSize: 12, padding: "5px 6px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, width: 130 }} />
+      <datalist id={listId}>
+        {(SUBCLASS_SUGGESTIONS[assetCat] || []).map((s) => <option key={s} value={s} />)}
+      </datalist>
+    </label>
+  );
+}
+
 function AddHoldingForm({ onAdd, fxRate }) {
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
@@ -2236,7 +2318,7 @@ Include up to 3 plausible candidates, best match first. If nothing plausible is 
   };
 
   const pick = async (c) => {
-    setPicked({ ...c });
+    setPicked({ ...c, tags: [c.instrumentType].filter(Boolean), subClass: null, memo: "" });
     setQtyInput("1");
     setPriceInput("");
     setPriceNote("");
@@ -2265,13 +2347,13 @@ Include up to 3 plausible candidates, best match first. If nothing plausible is 
   const addManually = () => {
     setPicked({
       name: query.trim() || "新しい銘柄", exchange: "", ticker: "",
-      instrumentType: "個別銘柄", currency: "JPY", assetCat: "その他",
+      currency: "JPY", assetCat: "その他", tags: ["個別銘柄"], subClass: null, memo: "",
     });
     setQtyInput("1"); setPriceInput(""); setPriceNote("");
     setError(""); setCandidates(null);
   };
 
-  const isFundPicked = picked && picked.instrumentType === "投信";
+  const isFundPicked = !!picked?.tags?.includes("投信");
 
   const confirmAdd = () => {
     if (!picked) return;
@@ -2289,10 +2371,9 @@ Include up to 3 plausible candidates, best match first. If nothing plausible is 
       priceJpyUnit: (picked.currency === "JPY" || isFund) ? unitPrice : null,
       valueJpy: avgJpyTotal, // 追加時点では取得単価＝評価額として初期化（後で価格取得により更新される）
       assetCat: picked.assetCat || "その他",
-      stockType: picked.assetCat === "株式" ? (picked.instrumentType === "ETF" ? "ETF" : "個別銘柄") : null,
-      commodityType: picked.assetCat === "コモディティ" ? picked.name : null,
-      bondType: picked.assetCat === "債権" ? picked.name : null,
-      instrumentType: picked.instrumentType || (picked.exchange ? "個別銘柄" : "投信"),
+      subClass: picked.subClass || null,
+      tags: picked.tags && picked.tags.length ? picked.tags : (picked.exchange ? ["個別銘柄"] : ["投信"]),
+      memo: picked.memo || "",
       currency: picked.currency === "USD" ? "ドル建" : "円建",
       autoFetchable: true,
       searchLabel: isFund ? picked.name : `${picked.exchange}:${picked.ticker}`,
@@ -2356,23 +2437,12 @@ Include up to 3 plausible candidates, best match first. If nothing plausible is 
               <div style={{ fontSize: 10.5, color: INK_SOFT, marginBottom: 4 }}>属性（検索結果から自動判定・編集可）</div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
                 <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 3 }}>
-                  種別
-                  <select value={picked.instrumentType} onChange={(e) => setPicked((p) => ({ ...p, instrumentType: e.target.value }))} style={selectStyle}>
-                    <option value="個別銘柄">個別銘柄</option>
-                    <option value="ETF">ETF</option>
-                    <option value="仮想通貨">仮想通貨</option>
-                    <option value="投信">投信</option>
-                  </select>
-                </label>
-                <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 3 }}>
                   資産クラス
                   <select value={picked.assetCat} onChange={(e) => setPicked((p) => ({ ...p, assetCat: e.target.value }))} style={selectStyle}>
-                    <option value="株式">株式</option>
-                    <option value="コモディティ">コモディティ</option>
-                    <option value="債権">債権</option>
-                    <option value="その他">その他</option>
+                    {ASSET_CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </label>
+                <SubClassField assetCat={picked.assetCat} value={picked.subClass} onChange={(v) => setPicked((p) => ({ ...p, subClass: v }))} />
                 <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 3 }}>
                   通貨
                   <select value={picked.currency} onChange={(e) => setPicked((p) => ({ ...p, currency: e.target.value }))} style={selectStyle}>
@@ -2381,6 +2451,15 @@ Include up to 3 plausible candidates, best match first. If nothing plausible is 
                   </select>
                 </label>
               </div>
+              <div style={{ fontSize: 10.5, color: INK_SOFT, marginBottom: 4 }}>タグ（種別・テーマなど複数選択可）</div>
+              <div style={{ marginBottom: 10 }}>
+                <TagPicker tags={picked.tags || []} onChange={(tags) => setPicked((p) => ({ ...p, tags }))} />
+              </div>
+              <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 3, marginBottom: 10 }}>
+                メモ
+                <input value={picked.memo || ""} onChange={(e) => setPicked((p) => ({ ...p, memo: e.target.value }))}
+                  placeholder="例：NISA枠、積立設定あり" style={{ fontSize: 12, padding: "5px 6px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3 }} />
+              </label>
               {!isFundPicked && (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
                   <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 3 }}>
@@ -2426,6 +2505,150 @@ Include up to 3 plausible candidates, best match first. If nothing plausible is 
   );
 }
 
+function assetCatColorKey(cat) {
+  return { "株式": "tuition", "債権": "car", "コモディティ": "housing", "仮想通貨": "social", "不動産": "medical" }[cat] || "other";
+}
+
+function BuyMoreForm({ h, onApply, onCancel, fxRate }) {
+  const isFund = h.qtyMode === "nav10000";
+  const [addQty, setAddQty] = useState("");
+  const [addPrice, setAddPrice] = useState("");
+  const fx = h.currency === "ドル建" ? (fxRate || 150) : 1;
+  const addCost = isFund
+    ? ((parseFloat(addQty) || 0) / 10000) * (parseFloat(addPrice) || 0)
+    : (parseFloat(addQty) || 0) * (parseFloat(addPrice) || 0) * fx;
+
+  const apply = () => {
+    const q = parseFloat(addQty) || 0;
+    if (!q) return;
+    const patch = { avgJpyTotal: (h.avgJpyTotal || 0) + addCost };
+    if (isFund) patch.unitsImplied = (h.unitsImplied || 0) + q;
+    else patch.qty = (h.qty || 0) + q;
+    onApply(patch);
+  };
+
+  return (
+    <div style={{ marginTop: 8, padding: 8, border: `1px dashed ${GOLD}`, borderRadius: 4, background: GOLD_SOFT }}>
+      <div style={{ fontSize: 11, color: INK_SOFT, marginBottom: 6 }}>
+        買い増し：追加した{isFund ? "口数" : "数量"}と購入単価を入れると、保有数量・取得額に合算します（評価額は自動更新されないので、あとで下の「評価額」欄も更新してください）
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 2 }}>
+          追加{isFund ? "口数" : "数量"}
+          <input type="number" value={addQty} onChange={(e) => setAddQty(e.target.value)}
+            style={{ width: 90, padding: "4px 6px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3 }} />
+        </label>
+        <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 2 }}>
+          購入単価{isFund ? "（1万口あたり・円）" : `（${h.currency === "ドル建" ? "$" : "¥"}）`}
+          <input type="number" value={addPrice} onChange={(e) => setAddPrice(e.target.value)}
+            style={{ width: 100, padding: "4px 6px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3 }} />
+        </label>
+      </div>
+      <div style={{ fontSize: 10.5, color: INK_SOFT, marginTop: 6 }}>追加取得額：{fmtYen(addCost)}</div>
+      <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+        <button onClick={apply} style={{ fontSize: 11.5, padding: "5px 10px", borderRadius: 4, border: "none", background: SUMI, color: "#fff", cursor: "pointer" }}>合算する</button>
+        <button onClick={onCancel} style={{ fontSize: 11.5, padding: "5px 10px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`, background: "transparent", cursor: "pointer" }}>キャンセル</button>
+      </div>
+    </div>
+  );
+}
+
+function HoldingCard({ h, onUpdate, onDelete, fxRate }) {
+  const [expanded, setExpanded] = useState(false);
+  const [buyMoreOpen, setBuyMoreOpen] = useState(false);
+  const pl = (h.valueJpy || 0) - (h.avgJpyTotal || 0);
+  const displayQty = h.qtyMode === "nav10000" ? h.unitsImplied : h.qty;
+
+  return (
+    <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 4, overflow: "hidden", background: "#fff" }}>
+      <button onClick={() => setExpanded((e) => !e)} style={{
+        width: "100%", textAlign: "left", padding: "8px 10px", border: "none", background: "transparent", cursor: "pointer",
+        display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8,
+      }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {h.ticker ? `${h.ticker} ` : ""}{h.name}
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 3 }}>
+            {h.subClass && <span style={{ fontSize: 9.5, background: PAPER, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "1px 6px", color: INK_SOFT }}>{h.subClass}</span>}
+            {(h.tags || []).map((t) => (
+              <span key={t} style={{ fontSize: 9.5, background: GOLD_SOFT, borderRadius: 8, padding: "1px 6px", color: INK }}>{t}</span>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 6, flexShrink: 0 }}>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: INK, fontVariantNumeric: "tabular-nums" }}>{fmtYen(h.valueJpy)}</div>
+            <div style={{ fontSize: 10.5, fontWeight: 600, color: pl >= 0 ? SUMI : SEAL, fontVariantNumeric: "tabular-nums" }}>{(pl >= 0 ? "+" : "") + fmtYen(pl)}</div>
+          </div>
+          <span style={{ color: INK_SOFT, fontSize: 11, marginTop: 2 }}>{expanded ? "▲" : "▼"}</span>
+        </div>
+      </button>
+      {expanded && (
+        <div style={{ padding: 10, borderTop: `1px solid ${PAPER_LINE}`, background: CARD }}>
+          {h.memo && (
+            <div style={{ fontSize: 10.5, color: INK_SOFT, fontStyle: "italic", marginBottom: 8 }}>{h.memo}</div>
+          )}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+            <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 2 }}>
+              資産クラス
+              <select value={h.assetCat} onChange={(e) => onUpdate({ assetCat: e.target.value })}
+                style={{ fontSize: 12, padding: "4px 6px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3 }}>
+                {ASSET_CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+            <SubClassField assetCat={h.assetCat} value={h.subClass} onChange={(v) => onUpdate({ subClass: v })} />
+          </div>
+          <div style={{ fontSize: 10.5, color: INK_SOFT, marginBottom: 4 }}>タグ</div>
+          <div style={{ marginBottom: 8 }}>
+            <TagPicker tags={h.tags || []} onChange={(tags) => onUpdate({ tags })} />
+          </div>
+          <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 2, marginBottom: 8 }}>
+            メモ
+            <input value={h.memo || ""} onChange={(e) => onUpdate({ memo: e.target.value })}
+              style={{ fontSize: 12, padding: "5px 6px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3 }} />
+          </label>
+          <div style={{ display: "flex", gap: 10, fontSize: 11.5, flexWrap: "wrap" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              {h.qtyMode === "nav10000" ? "保有口数" : "保有数量"}
+              <input type="number" value={displayQty ?? 0}
+                onChange={(e) => onUpdate(h.qtyMode === "nav10000" ? { unitsImplied: parseFloat(e.target.value) || 0 } : { qty: parseFloat(e.target.value) || 0 })}
+                style={{ width: 92, textAlign: "right", padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              取得額(¥)
+              <input type="number" value={h.avgJpyTotal} onChange={(e) => onUpdate({ avgJpyTotal: parseFloat(e.target.value) || 0 })}
+                style={{ width: 92, textAlign: "right", padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              評価額(¥)
+              <input type="number" value={h.valueJpy} onChange={(e) => onUpdate({ valueJpy: parseFloat(e.target.value) || 0 })}
+                style={{ width: 92, textAlign: "right", padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
+            </label>
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <button onClick={() => setBuyMoreOpen((o) => !o)} style={{
+              fontSize: 11.5, padding: "6px 10px", borderRadius: 4, border: `1px solid ${GOLD}`, background: buyMoreOpen ? GOLD_SOFT : "#fff", color: INK, cursor: "pointer",
+            }}>＋ 買い増し</button>
+            {h.autoFetchable ? (
+              <span style={{ fontSize: 10.5, color: h.lastUpdated ? SUMI : "#B8A26A" }}>{h.lastUpdated ? `更新:${h.lastUpdated}` : "自動取得対象"}</span>
+            ) : (
+              <span style={{ fontSize: 10.5, color: "#B8A26A" }}>手動更新のみ</span>
+            )}
+            <button onClick={onDelete} style={{
+              marginLeft: "auto", border: "none", background: "transparent", color: SEAL, fontSize: 11.5, cursor: "pointer",
+            }}>この銘柄を削除</button>
+          </div>
+          {buyMoreOpen && (
+            <BuyMoreForm h={h} fxRate={fxRate}
+              onApply={(patch) => { onUpdate(patch); setBuyMoreOpen(false); }}
+              onCancel={() => setBuyMoreOpen(false)} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, setParams, asOfDate, setAsOfDate }) {
   const totalCash = cashList.reduce((s, c) => s + (c.amount || 0), 0);
@@ -2471,10 +2694,10 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
     groups[cat].push(idx);
   });
 
-  const updateHolding = (idx, field, value) => {
+  const updateHoldingPatch = (idx, patch) => {
     setHoldings((prev) => {
       const next = [...prev];
-      next[idx] = { ...next[idx], [field]: value };
+      next[idx] = { ...next[idx], ...patch };
       return next;
     });
   };
@@ -2484,7 +2707,7 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
   const updateCashField = (idx, field, value) => {
     setCashList((prev) => { const next = [...prev]; next[idx] = { ...next[idx], [field]: value }; return next; });
   };
-  const addCash = () => setCashList((prev) => [...prev, { bank: `口座${prev.length + 1}`, amount: 0 }]);
+  const addCash = () => setCashList((prev) => [...prev, { bank: "", amount: 0 }]);
   const deleteCash = (idx) => setCashList((prev) => prev.filter((_, i) => i !== idx));
   const deleteHolding = (idx) => {
     if (!window.confirm("この銘柄を削除しますか？")) return;
@@ -2562,48 +2785,13 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
         {Object.entries(groups).map(([cat, idxs]) => {
           const subtotal = idxs.reduce((s, i) => s + (holdings[i].valueJpy || 0), 0);
           return (
-            <Accordion key={cat} title={`${cat} — ${fmtYen(subtotal)}`} colorKey={cat === "株式" ? "tuition" : cat === "債権" ? "car" : "housing"}>
+            <Accordion key={cat} title={`${cat} — ${fmtYen(subtotal)}`} colorKey={assetCatColorKey(cat)}>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {idxs.map((i) => {
-                  const h = holdings[i];
-                  const pl = (h.valueJpy || 0) - (h.avgJpyTotal || 0);
-                  return (
-                    <div key={i} style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 4, padding: "8px 10px" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 600, color: INK, maxWidth: "70%" }}>
-                          {h.ticker ? `${h.ticker} ` : ""}{h.name}
-                        </div>
-                        <div style={{ fontSize: 10.5, color: INK_SOFT, textAlign: "right" }}>
-                          {h.stockType || h.commodityType || h.bondType || h.instrumentType}
-                          {h.autoFetchable ? (
-                            <div style={{ color: h.lastUpdated ? SUMI : "#B8A26A" }}>{h.lastUpdated ? `更新:${h.lastUpdated}` : "自動取得対象"}</div>
-                          ) : (
-                            <div style={{ color: "#B8A26A" }}>手動更新のみ</div>
-                          )}
-                        </div>
-                        <button onClick={() => deleteHolding(i)} title="削除" style={{
-                          marginLeft: 6, border: "none", background: "transparent", color: SEAL, fontSize: 14, cursor: "pointer", lineHeight: 1, padding: "0 2px",
-                        }}>×</button>
-                      </div>
-                      <div style={{ display: "flex", gap: 10, fontSize: 11.5 }}>
-                        <label style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                          取得額(¥)
-                          <input type="number" value={h.avgJpyTotal} onChange={(e) => updateHolding(i, "avgJpyTotal", parseFloat(e.target.value) || 0)}
-                            style={{ width: 92, textAlign: "right", padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
-                        </label>
-                        <label style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                          評価額(¥)
-                          <input type="number" value={h.valueJpy} onChange={(e) => updateHolding(i, "valueJpy", parseFloat(e.target.value) || 0)}
-                            style={{ width: 92, textAlign: "right", padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
-                        </label>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 2, marginLeft: "auto", alignItems: "flex-end" }}>
-                          損益
-                          <span style={{ fontWeight: 700, color: pl >= 0 ? SUMI : SEAL }}>{(pl >= 0 ? "+" : "") + fmtYen(pl)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+                {idxs.map((i) => (
+                  <HoldingCard key={i} h={holdings[i]} fxRate={params.fxRate}
+                    onUpdate={(patch) => updateHoldingPatch(i, patch)}
+                    onDelete={() => deleteHolding(i)} />
+                ))}
               </div>
             </Accordion>
           );
@@ -2618,10 +2806,18 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
    ============================================================ */
 const PIE_PALETTE = [GOLD, SUMI, "#5B7FA6", SEAL, "#8E6BA6", "#C77B4F", "#6B9B6E", "#8FA6C7", "#5CA0A0", "#8A8577"];
 
+// 円グラフはアセットクラス単位で色分けする（サブクラスは同じ色のまま隣り合わせ、
+// 境界線で内訳のおよその割合が読み取れるようにする）
+const ASSET_CLASS_COLORS = {
+  "現金": SUMI, "株式": GOLD, "債権": "#5B7FA6", "コモディティ": "#C77B4F",
+  "仮想通貨": "#8E6BA6", "不動産": "#6B9B6E", "その他": "#8A8577",
+};
+function colorForAssetCat(cat) { return ASSET_CLASS_COLORS[cat] || "#8A8577"; }
+
 /* 円グラフのラベルが密集する小さい扇形どうしで重ならないよう、
    同じ側（左/右）に置いた既存の全ラベルとの距離を見て縦にずらしながら
    引き出し線（本体→折れ点→ラベル）を描く */
-function renderPieLeaderLabel() {
+function renderPieLeaderLabel(colors) {
   const placed = { left: [], right: [] };
   const MIN_GAP = 16;
   return (props) => {
@@ -2645,7 +2841,7 @@ function renderPieLeaderLabel() {
     arr.push(my);
     const legLen = 10;
     const ex = mx + (isRight ? legLen : -legLen);
-    const color = PIE_PALETTE[index % PIE_PALETTE.length];
+    const color = (colors && colors[index]) || PIE_PALETTE[index % PIE_PALETTE.length];
     const pct = `${(percent * 100).toFixed(percent < 0.03 ? 1 : 0)}%`;
     return (
       <g key={`pie-label-${name}`}>
@@ -2693,7 +2889,7 @@ function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, 
   let securitiesLikeTotalNow = 0;
   holdings.forEach((h) => {
     const cat = h.assetCat || "その他";
-    const sub = h.stockType || h.commodityType || h.bondType || "その他";
+    const sub = h.subClass || "その他";
     const key = `${cat} / ${sub}`;
     subMapNow[key] = (subMapNow[key] || 0) + (h.valueJpy || 0);
     securitiesLikeTotalNow += h.valueJpy || 0;
@@ -2716,7 +2912,7 @@ function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, 
       const v = snapshot.valueMap[idx];
       if (!v) return;
       const cat = h.assetCat || "その他";
-      const sub = h.stockType || h.commodityType || h.bondType || "その他";
+      const sub = h.subClass || "その他";
       const key = `${cat} / ${sub}`;
       map[key] = (map[key] || 0) + v.valueJpy;
     });
@@ -2740,7 +2936,22 @@ function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, 
     cashPortion = cashVal;
     mode = "estimate";
   }
-  const pieData = subRows.map(([k, v]) => ({ name: k, value: Math.round(v) }));
+  // アセットクラスの合計が大きい順にグループ化し、同じクラスの扇形が隣り合うようにする
+  // （クラス内はサブクラスの大きい順）。色はクラス単位で塗り、境界線でサブクラスを見分ける。
+  const pieRows = subRows.map(([k, v]) => {
+    const sepIdx = k.indexOf(" / ");
+    const cat = sepIdx >= 0 ? k.slice(0, sepIdx) : k;
+    return { name: k, value: Math.round(v), cat };
+  });
+  const catTotals = {};
+  pieRows.forEach((r) => { catTotals[r.cat] = (catTotals[r.cat] || 0) + r.value; });
+  pieRows.sort((a, b) => (catTotals[b.cat] - catTotals[a.cat]) || (b.value - a.value));
+  const pieData = pieRows;
+  const pieColors = pieData.map((r) => colorForAssetCat(r.cat));
+  const colorForKey = (k) => {
+    const sepIdx = k.indexOf(" / ");
+    return colorForAssetCat(sepIdx >= 0 ? k.slice(0, sepIdx) : k);
+  };
 
   const currencyMap = {};
   if (isNow) {
@@ -2809,8 +3020,8 @@ function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, 
       <div style={{ padding: "0 16px", height: 360, background: CARD }}>
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
-            <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={74} label={renderPieLeaderLabel()} labelLine={false} isAnimationActive={false}>
-              {pieData.map((_, i) => <Cell key={i} fill={PIE_PALETTE[i % PIE_PALETTE.length]} />)}
+            <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={74} label={renderPieLeaderLabel(pieColors)} labelLine={false} isAnimationActive={false}>
+              {pieData.map((_, i) => <Cell key={i} fill={pieColors[i]} stroke={CARD} strokeWidth={1.5} />)}
             </Pie>
             <Tooltip formatter={(v) => fmtYen(v)} contentStyle={{ fontSize: 12 }} />
           </PieChart>
@@ -2836,7 +3047,7 @@ function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, 
               borderBottom: i < subRows.length - 1 ? `1px solid ${PAPER_LINE}` : "none", fontSize: 12.5,
             }}>
               <span style={{ color: INK, display: "flex", alignItems: "center", gap: 7 }}>
-                <span style={{ width: 10, height: 10, borderRadius: "50%", background: PIE_PALETTE[i % PIE_PALETTE.length], flexShrink: 0 }} />
+                <span style={{ width: 10, height: 10, borderRadius: "50%", background: colorForKey(k), flexShrink: 0 }} />
                 {k}
               </span>
               <span style={{ fontWeight: 600, color: INK, fontVariantNumeric: "tabular-nums" }}>{fmtYen(v)} <span style={{ color: INK_SOFT, fontWeight: 400 }}>（{fmt((v / total) * 100, 1)}%）</span></span>
@@ -3327,7 +3538,7 @@ export default function App() {
         const parsed = JSON.parse(raw);
         if (parsed.sim) setSim(migrateSimFoodFields({ wizardTouched: [], ...parsed.sim }));
         if (parsed.params) setParams({ ...defaultParamsState(), ...parsed.params });
-        if (parsed.holdings) setHoldings(parsed.holdings);
+        if (parsed.holdings) setHoldings(migrateHoldingFields(parsed.holdings));
         if (parsed.cashList) setCashList(parsed.cashList);
         if (parsed.yearSnapshots) setYearSnapshots(parsed.yearSnapshots);
         if (parsed.family) setFamily(parsed.family);
@@ -3385,7 +3596,7 @@ export default function App() {
         if (!window.confirm("このファイルの内容で、今の編集内容を上書きします。よろしいですか？")) return;
         if (parsed.sim) setSim(migrateSimFoodFields({ wizardTouched: [], ...parsed.sim }));
         if (parsed.params) setParams({ ...defaultParamsState(), ...parsed.params });
-        if (parsed.holdings) setHoldings(parsed.holdings);
+        if (parsed.holdings) setHoldings(migrateHoldingFields(parsed.holdings));
         if (parsed.cashList) setCashList(parsed.cashList);
         if (parsed.yearSnapshots) setYearSnapshots(parsed.yearSnapshots);
         if (parsed.family) setFamily(parsed.family);
