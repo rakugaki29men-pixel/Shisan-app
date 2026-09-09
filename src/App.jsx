@@ -77,7 +77,41 @@ function fmt(n, digits = 0) {
 const fmtMan = (n) => fmt(n) + " 万円";
 const fmtYen = (n) => "¥" + fmt(n);
 
-function defaultSimState() { return { ...clone(RAW.sim), wizardTouched: [] }; }
+// 食費を家族一人ずつ（父・母・子1〜3）ではなく世帯でまとめて1行にする移行処理。
+// 既にlivingにfoodがある場合は何もしない。
+function migrateSimFoodFields(sim) {
+  const living = sim?.expense?.living;
+  if (!living || living.food) return sim;
+  const oldKeys = ["food_father", "food_mother", "food_child1", "food_child2", "food_child3"];
+  if (!oldKeys.some((k) => living[k])) return sim;
+  const next = clone(sim);
+  const nl = next.expense.living;
+  const food = zeros();
+  oldKeys.forEach((k) => {
+    const arr = nl[k];
+    if (arr) for (let i = 0; i < N; i++) food[i] += arr[i] || 0;
+    delete nl[k];
+  });
+  nl.food = food;
+  return next;
+}
+
+// 家計簿の紐付けが旧・家族別食費項目を指していた場合、統合後の項目に付け替える
+function migrateLedgerLinks(ledger) {
+  if (!ledger?.categories) return ledger;
+  const renameMap = {
+    "living.food_father": "living.food", "living.food_mother": "living.food",
+    "living.food_child1": "living.food", "living.food_child2": "living.food", "living.food_child3": "living.food",
+  };
+  let changed = false;
+  const categories = ledger.categories.map((c) => {
+    if (c.linkPath && renameMap[c.linkPath]) { changed = true; return { ...c, linkPath: renameMap[c.linkPath] }; }
+    return c;
+  });
+  return changed ? { ...ledger, categories } : ledger;
+}
+
+function defaultSimState() { return migrateSimFoodFields({ ...clone(RAW.sim), wizardTouched: [] }); }
 function defaultPortfolioState() { return clone(RAW.portfolio.holdings); }
 function defaultCashState() { return clone(RAW.cash); }
 
@@ -398,7 +432,7 @@ function computeModel(sim, params) {
   const tuitionKeys = ["child1", "child1_extra", "child2", "child2_extra", "child3", "child3_extra"];
   const medicalKeys = ["us", "gfather_p", "gmother_p", "gfather_m", "gmother_m"];
   const carKeys = ["body", "parking", "gas", "insurance", "tax", "inspection", "other"];
-  const livingKeys = ["food_father", "food_mother", "food_child1", "food_child2", "food_child3", "utilities", "communication", "daily_goods"];
+  const livingKeys = ["food", "utilities", "communication", "daily_goods"];
 
   const tuition = zeros(), medical = zeros(), carTotal = zeros(), livingTotal = zeros();
   let housingCost = zeros(), loanBalance = zeros(), loanInterest = zeros();
@@ -1565,11 +1599,7 @@ function SheetTab({ sim, setSim, params, setParams, family, setFamily }) {
             <SheetRow label="他経費" arr={exp.car.other} onChange={mk("car.other")} indent wizard={isWizard("car.other")} />
 
             <SheetSectionLabel text="他生活費" />
-            <SheetRow label={`食費：${childLabel("father", "父")}`} arr={exp.living.food_father} onChange={mk("living.food_father")} indent />
-            <SheetRow label={`食費：${childLabel("mother", "母")}`} arr={exp.living.food_mother} onChange={mk("living.food_mother")} indent />
-            <SheetRow label={`食費：${childLabel("child1", "子1")}`} arr={exp.living.food_child1} onChange={mk("living.food_child1")} indent />
-            <SheetRow label={`食費：${childLabel("child2", "子2")}`} arr={exp.living.food_child2} onChange={mk("living.food_child2")} indent />
-            <SheetRow label={`食費：${childLabel("child3", "子3")}`} arr={exp.living.food_child3} onChange={mk("living.food_child3")} indent />
+            <SheetRow label="食費" arr={exp.living.food} onChange={mk("living.food")} indent />
             <SheetRow label="光熱費" arr={exp.living.utilities} onChange={mk("living.utilities")} indent />
             <SheetRow label="通信費" arr={exp.living.communication} onChange={mk("living.communication")} indent />
             <SheetRow label="日用品・衣服" arr={exp.living.daily_goods} onChange={mk("living.daily_goods")} indent />
@@ -1974,11 +2004,7 @@ function SimulationTab({ sim, setSim, params, setParams, onOpenWizard, onOpenShe
         </Accordion>
         <Accordion title="他生活費" colorKey="living">
           <EditTable rows={[
-            { label: "食費：父", arr: sim.expense.living.food_father, onChange: mk("living.food_father") },
-            { label: "食費：母", arr: sim.expense.living.food_mother, onChange: mk("living.food_mother") },
-            { label: "食費：子1", arr: sim.expense.living.food_child1, onChange: mk("living.food_child1") },
-            { label: "食費：子2", arr: sim.expense.living.food_child2, onChange: mk("living.food_child2") },
-            { label: "食費：子3", arr: sim.expense.living.food_child3, onChange: mk("living.food_child3") },
+            { label: "食費", arr: sim.expense.living.food, onChange: mk("living.food") },
             { label: "光熱費", arr: sim.expense.living.utilities, onChange: mk("living.utilities") },
             { label: "通信費", arr: sim.expense.living.communication, onChange: mk("living.communication") },
             { label: "日用品・衣服", arr: sim.expense.living.daily_goods, onChange: mk("living.daily_goods") },
@@ -2850,7 +2876,7 @@ function defaultLedgerState() {
   return {
     entries: [],
     categories: [
-      { id: "food", name: "食費", type: "expense", linkPath: null },
+      { id: "food", name: "食費", type: "expense", linkPath: "living.food" },
       { id: "eatout", name: "外食", type: "expense", linkPath: null },
       { id: "daily", name: "日用品・衣服", type: "expense", linkPath: "living.daily_goods" },
       { id: "utilities", name: "光熱費", type: "expense", linkPath: "living.utilities" },
@@ -2893,11 +2919,7 @@ function getLinkableFields(params) {
     { group: "車", path: "car.tax", label: "税金" },
     { group: "車", path: "car.inspection", label: "車検" },
     { group: "車", path: "car.other", label: "他経費" },
-    { group: "他生活費", path: "living.food_father", label: "食費：父" },
-    { group: "他生活費", path: "living.food_mother", label: "食費：母" },
-    { group: "他生活費", path: "living.food_child1", label: "食費：子1" },
-    { group: "他生活費", path: "living.food_child2", label: "食費：子2" },
-    { group: "他生活費", path: "living.food_child3", label: "食費：子3" },
+    { group: "他生活費", path: "living.food", label: "食費" },
     { group: "他生活費", path: "living.utilities", label: "光熱費" },
     { group: "他生活費", path: "living.communication", label: "通信費" },
     { group: "他生活費", path: "living.daily_goods", label: "日用品・衣服" },
@@ -3303,13 +3325,13 @@ export default function App() {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (parsed.sim) setSim({ wizardTouched: [], ...parsed.sim });
+        if (parsed.sim) setSim(migrateSimFoodFields({ wizardTouched: [], ...parsed.sim }));
         if (parsed.params) setParams({ ...defaultParamsState(), ...parsed.params });
         if (parsed.holdings) setHoldings(parsed.holdings);
         if (parsed.cashList) setCashList(parsed.cashList);
         if (parsed.yearSnapshots) setYearSnapshots(parsed.yearSnapshots);
         if (parsed.family) setFamily(parsed.family);
-        if (parsed.ledger) setLedger({ ...defaultLedgerState(), ...parsed.ledger });
+        if (parsed.ledger) setLedger(migrateLedgerLinks({ ...defaultLedgerState(), ...parsed.ledger }));
       }
     } catch (e) { /* no saved state yet */ }
     setLoaded(true);
@@ -3361,13 +3383,13 @@ export default function App() {
       try {
         const parsed = JSON.parse(ev.target.result);
         if (!window.confirm("このファイルの内容で、今の編集内容を上書きします。よろしいですか？")) return;
-        if (parsed.sim) setSim({ wizardTouched: [], ...parsed.sim });
+        if (parsed.sim) setSim(migrateSimFoodFields({ wizardTouched: [], ...parsed.sim }));
         if (parsed.params) setParams({ ...defaultParamsState(), ...parsed.params });
         if (parsed.holdings) setHoldings(parsed.holdings);
         if (parsed.cashList) setCashList(parsed.cashList);
         if (parsed.yearSnapshots) setYearSnapshots(parsed.yearSnapshots);
         if (parsed.family) setFamily(parsed.family);
-        if (parsed.ledger) setLedger({ ...defaultLedgerState(), ...parsed.ledger });
+        if (parsed.ledger) setLedger(migrateLedgerLinks({ ...defaultLedgerState(), ...parsed.ledger }));
         setSaveNote("読み込み完了");
         setTimeout(() => setSaveNote(""), 1500);
       } catch (err) {
