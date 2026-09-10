@@ -812,7 +812,7 @@ function TabBar({ tabs, active, onChange }) {
 function SectionHeader({ title, sub, rightSlot }) {
   return (
     <div style={{ padding: "18px 16px 8px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-      <div>
+      <div style={{ flex: 1, minWidth: 0 }}>
         <h2 style={{
           margin: 0, fontFamily: "'Shippori Mincho','Noto Serif JP',serif", fontSize: 19,
           color: INK, letterSpacing: "0.03em", borderLeft: `4px solid ${GOLD}`, paddingLeft: 10,
@@ -3709,8 +3709,19 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
         </div>
       </div>
       <div style={{ display: "flex", gap: 8, padding: "0 16px 14px", flexWrap: "wrap" }}>
-        <StatCard label="評価額合計" value={fmtCur(shownValue)} tone="gold" corner={isFiltering ? pctOfTotal(shownValue, totalValue) : undefined} />
-        <StatCard label="含み損益" value={(shownPl >= 0 ? "+" : "") + fmtCur(shownPl)} tone={shownPl >= 0 ? "sumi" : "seal"} corner={isFiltering ? pctOfTotal(shownPl, totalPl) : undefined} />
+        <div style={{
+          background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 4, padding: "10px 14px",
+          flex: 2, minWidth: 200, display: "flex", flexDirection: "column", gap: 6, justifyContent: "center",
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+            <span style={{ fontSize: 11, color: INK_SOFT, flexShrink: 0 }}>評価額合計{isFiltering && ` (${pctOfTotal(shownValue, totalValue)})`}</span>
+            <span style={{ fontSize: 15, fontWeight: 700, color: GOLD, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmtCur(shownValue)}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+            <span style={{ fontSize: 11, color: INK_SOFT, flexShrink: 0 }}>含み損益{isFiltering && ` (${pctOfTotal(shownPl, totalPl)})`}</span>
+            <span style={{ fontSize: 15, fontWeight: 700, color: shownPl >= 0 ? SUMI : SEAL, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{(shownPl >= 0 ? "+" : "") + fmtCur(shownPl)}</span>
+          </div>
+        </div>
         <StatCard label="保有銘柄数" value={shownCount + "件"} tone="ink" small corner={isFiltering ? pctOfTotal(shownCount, holdings.length) : undefined} />
       </div>
       {filterOpen && (
@@ -4071,18 +4082,45 @@ function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, 
       <SectionHeader title="内訳明細" />
       <div style={{ padding: "0 16px" }}>
         <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 5, overflow: "hidden", background: CARD }}>
-          {subRows.map(([k, v], i) => (
-            <div key={k} style={{
-              display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px",
-              borderBottom: i < subRows.length - 1 ? `1px solid ${PAPER_LINE}` : "none", fontSize: 12.5,
-            }}>
-              <span style={{ color: INK, display: "flex", alignItems: "center", gap: 7 }}>
-                <span style={{ width: 10, height: 10, borderRadius: "50%", background: colorForKey(k), flexShrink: 0 }} />
-                {k}
-              </span>
-              <span style={{ fontWeight: 600, color: INK, fontVariantNumeric: "tabular-nums" }}>{fmtYen(v)} <span style={{ color: INK_SOFT, fontWeight: 400 }}>（{fmt((v / total) * 100, 1)}%）</span></span>
-            </div>
-          ))}
+          {(() => {
+            // アセットクラス（"株式 / 米国"の"株式"部分）ごとにグループ化し、
+            // クラスの合計が大きい順に、見出し行に全体に占める割合を表示する
+            const groups = {};
+            const order = [];
+            subRows.forEach(([k, v]) => {
+              const sepIdx = k.indexOf(" / ");
+              const cat = sepIdx >= 0 ? k.slice(0, sepIdx) : k;
+              if (!groups[cat]) { groups[cat] = []; order.push(cat); }
+              groups[cat].push([k, v]);
+            });
+            const groupedRows = order
+              .map((cat) => ({ cat, rows: groups[cat], catTotal: groups[cat].reduce((s, [, v]) => s + v, 0) }))
+              .sort((a, b) => b.catTotal - a.catTotal);
+            return groupedRows.map((g, gi) => (
+              <div key={g.cat}>
+                <div style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 12px",
+                  background: PAPER, borderTop: gi > 0 ? `1px solid ${PAPER_LINE}` : "none", borderBottom: `1px solid ${PAPER_LINE}`,
+                  fontSize: 11.5, fontWeight: 700, color: INK,
+                }}>
+                  <span>{g.cat}</span>
+                  <span style={{ fontVariantNumeric: "tabular-nums" }}>{fmt((g.catTotal / total) * 100, 1)}%</span>
+                </div>
+                {g.rows.map(([k, v], i) => (
+                  <div key={k} style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px 8px 22px",
+                    borderBottom: i < g.rows.length - 1 ? `1px solid ${PAPER_LINE}` : "none", fontSize: 12.5,
+                  }}>
+                    <span style={{ color: INK, display: "flex", alignItems: "center", gap: 7 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: "50%", background: colorForKey(k), flexShrink: 0 }} />
+                      {k}
+                    </span>
+                    <span style={{ fontWeight: 600, color: INK, fontVariantNumeric: "tabular-nums" }}>{fmtYen(v)} <span style={{ color: INK_SOFT, fontWeight: 400 }}>（{fmt((v / total) * 100, 1)}%）</span></span>
+                  </div>
+                ))}
+              </div>
+            ));
+          })()}
         </div>
       </div>
 
@@ -4717,7 +4755,7 @@ export default function App() {
             <button onClick={() => setShowShareModal(true)} aria-label="共有" style={{
               fontSize: 11, color: householdId ? "#8FD9B6" : "#D8C089", background: "transparent", border: "1px solid #4A5A75",
               borderRadius: 4, padding: "5px 9px", cursor: "pointer", whiteSpace: "nowrap",
-            }}>🔗 {householdId ? "共有中" : "共有する"}</button>
+            }}>🔗 {householdId ? "共有中" : "共有"}</button>
           )}
           <button onClick={() => setAppMode("ledger")} aria-label="家計簿" style={{
             fontSize: 11, color: "#D8C089", background: "transparent", border: "1px solid #4A5A75",
