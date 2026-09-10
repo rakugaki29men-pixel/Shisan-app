@@ -3759,9 +3759,11 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
           <div style={{ fontSize: 11, color: INK_SOFT, marginBottom: 10 }}>
             日付を指定すると、その日（休場日の場合は直近の取引日）の終値でETF・個別株・仮想通貨（{holdings.filter((h) => h.autoFetchable).length}件）の評価額を再計算します
           </div>
-          <div style={{ fontSize: 11, color: SEAL, background: SEAL_SOFT, borderRadius: 4, padding: "6px 8px", marginBottom: 10 }}>
-            ⚠ 価格の自動取得は現在準備中です。ボタンを押すと「失敗」になりますが正常な動作です。今は各銘柄の評価額を下の欄で手入力してください。
-          </div>
+          {!PRICE_API_BASE && (
+            <div style={{ fontSize: 11, color: SEAL, background: SEAL_SOFT, borderRadius: 4, padding: "6px 8px", marginBottom: 10 }}>
+              ⚠ 価格自動取得サーバーが未設定のため、ボタンを押すと「失敗」になります。各銘柄の評価額を下の欄で手入力してください。
+            </div>
+          )}
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <input type="date" value={asOfDate} max={todayStr} onChange={(e) => setAsOfDate(e.target.value)}
               style={{ padding: "6px 8px", fontSize: 13, border: `1px solid ${PAPER_LINE}`, borderRadius: 4, fontVariantNumeric: "tabular-nums" }} />
@@ -3783,7 +3785,7 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
               style={{ width: 70, padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
           </div>
           <div style={{ fontSize: 10.5, color: INK_SOFT, marginTop: 6 }}>
-            ※ 投資信託は元データの保有口数が不明なため、現在の評価額と基準価額から口数を逆算して概算しています（正確な口数ではありません）。過去日付はWeb検索による推定のため、実際の終値・基準価額と多少ずれる場合があります。
+            ※ 投資信託は元データの保有口数が不明なため、現在の評価額と基準価額から口数を逆算して概算しています（正確な口数ではありません）。過去日付の価格は取得先データの都合上、実際の終値・基準価額と多少ずれる場合があります。
           </div>
         </div>
       </div>
@@ -4022,7 +4024,7 @@ function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, 
     <div style={{ paddingBottom: 40 }}>
       <SectionHeader title="資産集計" sub={
         mode === "now" ? `${asOfDate} 時点の保有ポートフォリオ・現金の内訳` :
-        mode === "snapshot" ? `${selectedYear}年末の実勢価格（Web検索取得・${snapshot.fetchedAt}に取得）に基づく内訳` :
+        mode === "snapshot" ? `${selectedYear}年末の実勢価格（${snapshot.fetchedAt}に取得）に基づく内訳` :
         "試算：その年の資産配分（指定時点の保有比率をシミュレーション結果に適用した推計）"
       } />
 
@@ -4056,11 +4058,13 @@ function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, 
                 }}>{snapFetching ? "取得中…" : snapshot ? "この年を再取得" : "この年末の実勢価格を取得"}</button>
                 {snapStatus && <span style={{ fontSize: 11, color: SUMI }}>{snapStatus}</span>}
               </div>
-              <div style={{ fontSize: 11, color: SEAL, background: SEAL_SOFT, borderRadius: 4, padding: "6px 8px", marginTop: 6 }}>
-                ⚠ 価格の自動取得は現在準備中です。ボタンを押すと「失敗」になりますが正常な動作です。
-              </div>
+              {!PRICE_API_BASE && (
+                <div style={{ fontSize: 11, color: SEAL, background: SEAL_SOFT, borderRadius: 4, padding: "6px 8px", marginTop: 6 }}>
+                  ⚠ 価格自動取得サーバーが未設定のため、ボタンを押すと「失敗」になります。
+                </div>
+              )}
               <div style={{ fontSize: 10, color: INK_SOFT, marginTop: 6 }}>
-                {selectedYear}年12月31日（休場日ならその直前の取引日）の終値・基準価額をWeb検索で取得し、現在保有している銘柄で当時の資産配分を再現します。現金残高は当時の記録がないため現在の残高で代用しています。
+                {selectedYear}年12月31日（休場日ならその直前の取引日）の終値・基準価額を取得し、現在保有している銘柄で当時の資産配分を再現します。現金残高は当時の記録がないため現在の残高で代用しています。
               </div>
             </div>
           )}
@@ -4093,7 +4097,7 @@ function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, 
       )}
       {mode === "snapshot" && (
         <div style={{ padding: "6px 16px 0", fontSize: 10.5, color: INK_SOFT }}>
-          ※ Web検索による取得のため、実際の終値・基準価額と多少ずれる場合があります。現金残高は当時の記録がなく現在の残高を代用しています。
+          ※ 取得先データの都合上、実際の終値・基準価額と多少ずれる場合があります。現金残高は当時の記録がなく現在の残高を代用しています。
         </div>
       )}
 

@@ -17,6 +17,7 @@ yfinance（無料・APIキー不要）でYahoo Financeのデータを取得す�
       銘柄名・ティッカーのあいまい検索。Yahoo Financeの検索候補をそのまま変換する。
 """
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 
 from flask import Flask, jsonify, request
@@ -99,6 +100,32 @@ def fx():
         return jsonify({"error": str(e)}), 500
 
 
+def _fetch_one_price(symbol, date_str):
+    try:
+        ticker = yf.Ticker(symbol)
+        if date_str:
+            start, end = _date_range_around(date_str)
+            hist = ticker.history(start=start, end=end)
+            if hist.empty:
+                return None
+            price = float(hist.iloc[0]["Close"])
+            as_of = hist.index[0].strftime("%Y-%m-%d")
+        else:
+            hist = ticker.history(period="5d")
+            if hist.empty:
+                return None
+            price = float(hist.iloc[-1]["Close"])
+            as_of = hist.index[-1].strftime("%Y-%m-%d")
+        return {
+            "symbol": symbol,
+            "price": round(price, 4),
+            "currency": _currency_for(symbol),
+            "asOf": as_of,
+        }
+    except Exception:
+        return None  # この銘柄だけスキップし、他の銘柄の取得は継続する
+
+
 @app.route("/prices")
 def prices():
     symbols_param = request.args.get("symbols", "")
@@ -107,31 +134,14 @@ def prices():
     if not symbols:
         return jsonify([])
 
+    # I/O待ちがほとんどなので並列化して合計時間を短縮する（無料プランのCPUが遅いため直列だとタイムアウトしやすい）
     results = []
-    for symbol in symbols:
-        try:
-            ticker = yf.Ticker(symbol)
-            if date_str:
-                start, end = _date_range_around(date_str)
-                hist = ticker.history(start=start, end=end)
-                if hist.empty:
-                    continue
-                price = float(hist.iloc[0]["Close"])
-                as_of = hist.index[0].strftime("%Y-%m-%d")
-            else:
-                hist = ticker.history(period="5d")
-                if hist.empty:
-                    continue
-                price = float(hist.iloc[-1]["Close"])
-                as_of = hist.index[-1].strftime("%Y-%m-%d")
-            results.append({
-                "symbol": symbol,
-                "price": round(price, 4),
-                "currency": _currency_for(symbol),
-                "asOf": as_of,
-            })
-        except Exception:
-            continue  # この銘柄だけスキップし、他の銘柄の取得は継続する
+    with ThreadPoolExecutor(max_workers=min(10, len(symbols))) as executor:
+        futures = [executor.submit(_fetch_one_price, s, date_str) for s in symbols]
+        for future in as_completed(futures):
+            r = future.result()
+            if r is not None:
+                results.append(r)
 
     return jsonify(results)
 
