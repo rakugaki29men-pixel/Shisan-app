@@ -3,6 +3,12 @@ import {
   AreaChart, Area, LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine, ReferenceDot
 } from "recharts";
+import { isFirebaseConfigured } from "./firebase";
+import { watchAuthState, signUp, signIn, signOut } from "./auth";
+import {
+  getMyHouseholdId, createHousehold, joinHouseholdByCode, leaveHousehold,
+  getHouseholdInfo, subscribeHouseholdData, saveHouseholdData,
+} from "./household";
 
 /* ============================================================
    埋め込みデータ（元エクセルファイルから抽出）
@@ -252,6 +258,39 @@ function migrateUnitScaleV1(sim, params) {
     if (typeof nextParams[k] === "number") nextParams[k] = nextParams[k] / 10;
   });
   return { sim: nextSim, params: nextParams };
+}
+
+// localStorage・バックアップファイル・クラウド（Firestore）のいずれから読み込んだ場合でも
+// 同じマイグレーション処理を通すための共通ヘルパー
+function migrateLoadedState(parsed) {
+  const loadedSim = parsed.sim ? migrateSimFoodFields({ wizardTouched: [], ...parsed.sim }) : null;
+  const loadedParams = parsed.params ? { ...defaultParamsState(), ...parsed.params } : null;
+  let fixedSim = loadedSim, fixedParams = loadedParams;
+  if (loadedSim || loadedParams) {
+    const r = migrateUnitScaleV1(loadedSim || defaultSimState(), loadedParams || defaultParamsState());
+    fixedSim = loadedSim ? r.sim : null;
+    fixedParams = loadedParams ? r.params : null;
+  }
+  return {
+    sim: fixedSim,
+    params: fixedParams,
+    holdings: parsed.holdings ? migrateHoldingFields(parsed.holdings) : null,
+    cashList: parsed.cashList || null,
+    yearSnapshots: parsed.yearSnapshots || null,
+    family: parsed.family || null,
+    ledger: parsed.ledger ? migrateLedgerLinks({ ...defaultLedgerState(), ...parsed.ledger }) : null,
+    scenario: parsed.scenario ? { ...defaultScenarioState(), ...parsed.scenario } : null,
+  };
+}
+function applyMigratedState(migrated, setters) {
+  if (migrated.sim) setters.setSim(migrated.sim);
+  if (migrated.params) setters.setParams(migrated.params);
+  if (migrated.holdings) setters.setHoldings(migrated.holdings);
+  if (migrated.cashList) setters.setCashList(migrated.cashList);
+  if (migrated.yearSnapshots) setters.setYearSnapshots(migrated.yearSnapshots);
+  if (migrated.family) setters.setFamily(migrated.family);
+  if (migrated.ledger) setters.setLedger(migrated.ledger);
+  if (migrated.scenario) setters.setScenario(migrated.scenario);
 }
 
 // 家計簿の紐付けが旧・家族別食費項目を指していた場合、統合後の項目に付け替える
@@ -2080,6 +2119,156 @@ function SettingsModal({ sim, setSim, params, setParams, onOpenFamily, onOpenWiz
             「初期データにリセット」は、これまでの入力内容をすべて消して、アプリ最初のサンプルデータに戻します（元に戻せません。必要なら先にエクスポートで保存してください）。
           </div>
         </SettingsSection>
+      </div>
+    </div>
+  );
+}
+
+function ShareModal({ authLoading, user, householdId, householdInfo, onHouseholdIdChange, onClose }) {
+  const [mode, setMode] = useState("signin"); // "signin" | "signup"
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [inviteInput, setInviteInput] = useState("");
+  const [createdCode, setCreatedCode] = useState("");
+
+  const runAuth = async () => {
+    setError(""); setBusy(true);
+    try {
+      if (mode === "signup") await signUp(email.trim(), password);
+      else await signIn(email.trim(), password);
+    } catch (e) {
+      setError(e.message || "エラーが発生しました。");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleCreate = async () => {
+    setError(""); setBusy(true);
+    try {
+      const { householdId: newId, inviteCode } = await createHousehold(user.uid);
+      setCreatedCode(inviteCode);
+      onHouseholdIdChange(newId);
+    } catch (e) {
+      setError(e.message || "世帯の作成に失敗しました。");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleJoin = async () => {
+    if (!inviteInput.trim()) return;
+    setError(""); setBusy(true);
+    try {
+      const joinedId = await joinHouseholdByCode(user.uid, inviteInput);
+      onHouseholdIdChange(joinedId);
+    } catch (e) {
+      setError(e.message || "参加に失敗しました。");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleLeave = async () => {
+    if (!window.confirm("この世帯の共有をやめて、ローカル保存のみに戻しますか？（他のメンバーのデータは残ります）")) return;
+    setBusy(true);
+    try {
+      await leaveHousehold(user.uid, householdId);
+      onHouseholdIdChange(null);
+    } catch (e) {
+      setError(e.message || "退出に失敗しました。");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: PAPER, zIndex: 200, overflowY: "auto",
+      fontFamily: "'Noto Sans JP','Hiragino Sans',sans-serif",
+    }}>
+      <div style={{ background: INK, color: PAPER, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, zIndex: 5 }}>
+        <div style={{ fontFamily: "'Shippori Mincho','Noto Serif JP',serif", fontSize: 17 }}>🔗 誰かと共有する</div>
+        <button onClick={onClose} style={{ background: "transparent", border: "1px solid #4A5A75", color: PAPER, borderRadius: 4, padding: "5px 10px", fontSize: 12, cursor: "pointer" }}>閉じる ×</button>
+      </div>
+
+      <div style={{ padding: "14px 16px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
+        {authLoading ? (
+          <div style={{ fontSize: 13, color: INK_SOFT }}>読み込み中…</div>
+        ) : !user ? (
+          <SettingsSection title={mode === "signup" ? "新規登録" : "ログイン"}>
+            <div style={{ fontSize: 11.5, color: INK_SOFT, marginBottom: 10 }}>
+              家族や配偶者とデータをリアルタイムで共有するには、まずログインしてください（メールアドレスとパスワードだけで登録できます）。
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 320 }}>
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="メールアドレス"
+                style={{ padding: "8px 10px", fontSize: 13, border: `1px solid ${PAPER_LINE}`, borderRadius: 4 }} />
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="パスワード（6文字以上）"
+                style={{ padding: "8px 10px", fontSize: 13, border: `1px solid ${PAPER_LINE}`, borderRadius: 4 }} />
+              {error && <div style={{ fontSize: 11.5, color: SEAL }}>{error}</div>}
+              <button onClick={runAuth} disabled={busy || !email.trim() || password.length < 6} style={{
+                ...settingsBtnStyle, border: `1px solid ${GOLD}`, background: GOLD_SOFT,
+                opacity: busy || !email.trim() || password.length < 6 ? 0.5 : 1,
+              }}>{mode === "signup" ? "新規登録する" : "ログインする"}</button>
+              <button onClick={() => { setMode((m) => m === "signup" ? "signin" : "signup"); setError(""); }} style={{
+                border: "none", background: "transparent", color: INK_SOFT, fontSize: 11.5, cursor: "pointer", textAlign: "left", textDecoration: "underline",
+              }}>{mode === "signup" ? "すでにアカウントをお持ちの方はこちら" : "初めての方はこちら（新規登録）"}</button>
+            </div>
+          </SettingsSection>
+        ) : !householdId ? (
+          <>
+            <SettingsSection title="世帯を作る、または参加する">
+              <div style={{ fontSize: 11.5, color: INK_SOFT, marginBottom: 10 }}>
+                ログイン中：{user.email}
+              </div>
+              {createdCode ? (
+                <div style={{ background: GOLD_SOFT, border: `1px solid ${GOLD}`, borderRadius: 5, padding: 14, textAlign: "center" }}>
+                  <div style={{ fontSize: 11.5, color: INK_SOFT, marginBottom: 6 }}>世帯を作成しました。この招待コードを共有したい相手に伝えてください。</div>
+                  <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: "0.15em", color: INK, fontVariantNumeric: "tabular-nums" }}>{createdCode}</div>
+                </div>
+              ) : (
+                <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 12 }}>
+                  <div style={{ fontSize: 11.5, color: INK_SOFT, marginBottom: 8 }}>今のデータをこの世帯の共有データとして使います。</div>
+                  <button onClick={handleCreate} disabled={busy} style={{ ...settingsBtnStyle, border: `1px solid ${GOLD}`, background: GOLD_SOFT }}>📍 新しく世帯を作成する</button>
+                </div>
+              )}
+            </SettingsSection>
+            {!createdCode && (
+              <SettingsSection title="招待コードで参加する">
+                <div style={{ fontSize: 11.5, color: INK_SOFT, marginBottom: 8 }}>
+                  相手から受け取った招待コードを入力してください。参加すると、今この端末にある編集内容は世帯の共有データに置き換わります。
+                </div>
+                <div style={{ display: "flex", gap: 8, maxWidth: 300 }}>
+                  <input value={inviteInput} onChange={(e) => setInviteInput(e.target.value.toUpperCase())} placeholder="例：AB12CD"
+                    style={{ flex: 1, padding: "8px 10px", fontSize: 14, letterSpacing: "0.1em", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, textTransform: "uppercase" }} />
+                  <button onClick={handleJoin} disabled={busy || !inviteInput.trim()} style={{ ...settingsBtnStyle, border: `1px solid ${GOLD}`, background: GOLD_SOFT }}>参加</button>
+                </div>
+                {error && <div style={{ fontSize: 11.5, color: SEAL, marginTop: 8 }}>{error}</div>}
+              </SettingsSection>
+            )}
+            <button onClick={() => signOut()} style={{ border: "none", background: "transparent", color: INK_SOFT, fontSize: 11.5, cursor: "pointer", textAlign: "left", textDecoration: "underline" }}>ログアウト</button>
+          </>
+        ) : (
+          <SettingsSection title="共有中">
+            <div style={{ background: SUMI_SOFT, border: `1px solid ${SUMI}`, borderRadius: 5, padding: 12, marginBottom: 12 }}>
+              <div style={{ fontSize: 12.5, color: INK, marginBottom: 4 }}>✓ この世帯のデータをリアルタイムで共有しています</div>
+              <div style={{ fontSize: 11, color: INK_SOFT }}>メンバー数：{householdInfo?.members?.length ?? "-"}人</div>
+              {householdInfo?.inviteCode && (
+                <div style={{ fontSize: 11, color: INK_SOFT, marginTop: 4 }}>
+                  招待コード：<b style={{ fontVariantNumeric: "tabular-nums", letterSpacing: "0.1em" }}>{householdInfo.inviteCode}</b>（他のメンバーを招待するときに使えます）
+                </div>
+              )}
+            </div>
+            <div style={{ fontSize: 11.5, color: INK_SOFT, marginBottom: 10 }}>ログイン中：{user.email}</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button onClick={handleLeave} disabled={busy} style={{ ...settingsBtnStyle, color: SEAL, border: `1px solid ${SEAL}` }}>この世帯の共有をやめる</button>
+              <button onClick={() => signOut()} style={settingsBtnStyle}>ログアウト</button>
+            </div>
+            {error && <div style={{ fontSize: 11.5, color: SEAL, marginTop: 8 }}>{error}</div>}
+          </SettingsSection>
+        )}
       </div>
     </div>
   );
@@ -4232,28 +4421,72 @@ export default function App() {
   const openCostWizard = (step) => { setCostWizardStep(step); setShowCostWizard(true); };
   const saveTimer = useRef(null);
 
+  // 誰かとリアルタイムで共有する機能（Firebase）。未設定の環境では一切動かず、
+  // 今まで通りローカル保存のみで動作する
+  const [authLoading, setAuthLoading] = useState(isFirebaseConfigured);
+  const [user, setUser] = useState(null);
+  const [householdId, setHouseholdId] = useState(null);
+  const [householdInfo, setHouseholdInfo] = useState(null);
+  const [cloudDataLoaded, setCloudDataLoaded] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const skipNextCloudSaveRef = useRef(false);
+  const cloudSaveTimer = useRef(null);
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (parsed.sim || parsed.params) {
-          const loadedSim = parsed.sim ? migrateSimFoodFields({ wizardTouched: [], ...parsed.sim }) : defaultSimState();
-          const loadedParams = parsed.params ? { ...defaultParamsState(), ...parsed.params } : defaultParamsState();
-          const { sim: fixedSim, params: fixedParams } = migrateUnitScaleV1(loadedSim, loadedParams);
-          if (parsed.sim) setSim(fixedSim);
-          if (parsed.params) setParams(fixedParams);
-        }
-        if (parsed.holdings) setHoldings(migrateHoldingFields(parsed.holdings));
-        if (parsed.cashList) setCashList(parsed.cashList);
-        if (parsed.yearSnapshots) setYearSnapshots(parsed.yearSnapshots);
-        if (parsed.family) setFamily(parsed.family);
-        if (parsed.ledger) setLedger(migrateLedgerLinks({ ...defaultLedgerState(), ...parsed.ledger }));
-        if (parsed.scenario) setScenario({ ...defaultScenarioState(), ...parsed.scenario });
+        applyMigratedState(migrateLoadedState(parsed), {
+          setSim, setParams, setHoldings, setCashList, setYearSnapshots, setFamily, setLedger, setScenario,
+        });
       }
     } catch (e) { /* no saved state yet */ }
     setLoaded(true);
   }, []);
+
+  useEffect(() => {
+    if (!isFirebaseConfigured) return;
+    const unsub = watchAuthState((u) => { setUser(u); setAuthLoading(false); });
+    return unsub;
+  }, []);
+
+  useEffect(() => {
+    if (!user) { setHouseholdId(null); return; }
+    let cancelled = false;
+    getMyHouseholdId(user.uid).then((id) => { if (!cancelled) setHouseholdId(id); });
+    return () => { cancelled = true; };
+  }, [user]);
+
+  useEffect(() => {
+    setCloudDataLoaded(false);
+    setHouseholdInfo(null);
+    if (!householdId) return;
+    getHouseholdInfo(householdId).then((info) => setHouseholdInfo(info));
+    const unsub = subscribeHouseholdData(householdId, (data, hasPendingWrites) => {
+      if (hasPendingWrites) return; // 自分がこの端末で書いた分の反響は無視する
+      if (data) {
+        skipNextCloudSaveRef.current = true;
+        applyMigratedState(migrateLoadedState(data), {
+          setSim, setParams, setHoldings, setCashList, setYearSnapshots, setFamily, setLedger, setScenario,
+        });
+      }
+      setCloudDataLoaded(true);
+    });
+    return unsub;
+  }, [householdId]);
+
+  useEffect(() => {
+    if (!householdId || !cloudDataLoaded) return;
+    if (skipNextCloudSaveRef.current) { skipNextCloudSaveRef.current = false; return; }
+    if (cloudSaveTimer.current) clearTimeout(cloudSaveTimer.current);
+    cloudSaveTimer.current = setTimeout(() => {
+      saveHouseholdData(householdId, { sim, params, holdings, cashList, yearSnapshots, family, ledger, scenario })
+        .catch(() => { /* オフライン等：次の変更時に再送される */ });
+    }, 700);
+    return () => clearTimeout(cloudSaveTimer.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sim, params, holdings, cashList, yearSnapshots, family, ledger, scenario, householdId, cloudDataLoaded]);
 
   useEffect(() => {
     if (!loaded) return;
@@ -4302,19 +4535,9 @@ export default function App() {
       try {
         const parsed = JSON.parse(ev.target.result);
         if (!window.confirm("このファイルの内容で、今の編集内容を上書きします。よろしいですか？")) return;
-        if (parsed.sim || parsed.params) {
-          const loadedSim = parsed.sim ? migrateSimFoodFields({ wizardTouched: [], ...parsed.sim }) : defaultSimState();
-          const loadedParams = parsed.params ? { ...defaultParamsState(), ...parsed.params } : defaultParamsState();
-          const { sim: fixedSim, params: fixedParams } = migrateUnitScaleV1(loadedSim, loadedParams);
-          if (parsed.sim) setSim(fixedSim);
-          if (parsed.params) setParams(fixedParams);
-        }
-        if (parsed.holdings) setHoldings(migrateHoldingFields(parsed.holdings));
-        if (parsed.cashList) setCashList(parsed.cashList);
-        if (parsed.yearSnapshots) setYearSnapshots(parsed.yearSnapshots);
-        if (parsed.family) setFamily(parsed.family);
-        if (parsed.ledger) setLedger(migrateLedgerLinks({ ...defaultLedgerState(), ...parsed.ledger }));
-        if (parsed.scenario) setScenario({ ...defaultScenarioState(), ...parsed.scenario });
+        applyMigratedState(migrateLoadedState(parsed), {
+          setSim, setParams, setHoldings, setCashList, setYearSnapshots, setFamily, setLedger, setScenario,
+        });
         setSaveNote("読み込み完了");
         setTimeout(() => setSaveNote(""), 1500);
       } catch (err) {
@@ -4337,6 +4560,12 @@ export default function App() {
           <div style={{ fontSize: 10.5, color: "#AEB9CC", marginTop: 2 }}>{YEARS[0]}–{YEARS[N - 1]} 年 資産・収支プラン</div>
         </div>
         <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+          {isFirebaseConfigured && (
+            <button onClick={() => setShowShareModal(true)} aria-label="共有" style={{
+              fontSize: 11, color: householdId ? "#8FD9B6" : "#D8C089", background: "transparent", border: "1px solid #4A5A75",
+              borderRadius: 4, padding: "5px 9px", cursor: "pointer", whiteSpace: "nowrap",
+            }}>🔗 {householdId ? "共有中" : "共有する"}</button>
+          )}
           <button onClick={() => setAppMode("ledger")} aria-label="家計簿" style={{
             fontSize: 11, color: "#D8C089", background: "transparent", border: "1px solid #4A5A75",
             borderRadius: 4, padding: "5px 9px", cursor: "pointer", whiteSpace: "nowrap",
@@ -4348,6 +4577,11 @@ export default function App() {
         </div>
       </div>
       <input ref={fileInputRef} type="file" accept="application/json" onChange={handleImportFile} style={{ display: "none" }} />
+      {showShareModal && (
+        <ShareModal authLoading={authLoading} user={user} householdId={householdId} householdInfo={householdInfo}
+          onHouseholdIdChange={setHouseholdId}
+          onClose={() => setShowShareModal(false)} />
+      )}
       {showSettings && (
         <SettingsModal sim={sim} setSim={setSim} params={params} setParams={setParams}
           onOpenFamily={() => { setShowSettings(false); setShowFamilyModal(true); }}
