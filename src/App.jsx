@@ -7,7 +7,7 @@ import {
 /* ============================================================
    埋め込みデータ（元エクセルファイルから抽出）
    ============================================================ */
-const RAW = {"sim": {"years": [2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035, 2036, 2037, 2038, 2039, 2040, 2041, 2042, 2043, 2044, 2045, 2046, 2047, 2048, 2049, 2050, 2051, 2052, 2053, 2054, 2055, 2056, 2057, 2058, 2059, 2060], "params": {"housingType": 1.0, "loanInitial": 60000, "loanRate": 0.01, "buildingInitial": 20000.0, "landInitial": 40000.0, "dividendRate": 0.01, "growthRate": 1.03, "realEstateFlag": "無", "initAssetSecurities2019": null, "repairNotes": null}, "expense": {"tuition": {"child1": [150.0, 120.0, 120.0, 120.0, 120.0, 120.0, 120.0, 500.0, 500.0, 500.0, 500.0, 500.0, 500.0, 2000.0, 2000.0, 2000.0, 2000.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "child1_extra": [0, 120.0, 120.0, 120.0, 120.0, 120.0, 120.0, 200.0, 200.0, 350.0, 500.0, 500.0, 700.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "child2": [0, 0, 150.0, 150.0, 150.0, 120.0, 120.0, 120.0, 120.0, 120.0, 120.0, 500.0, 500.0, 500.0, 500.0, 500.0, 500.0, 2000.0, 2000.0, 2000.0, 2000.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "child2_extra": [0, 0, 0, 0, 0, 120.0, 120.0, 120.0, 120.0, 120.0, 120.0, 200.0, 200.0, 350.0, 500.0, 500.0, 700.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "child3": [0, 0, 0, 0, 150.0, 150.0, 150.0, 120.0, 120.0, 120.0, 120.0, 120.0, 120.0, 500.0, 500.0, 500.0, 500.0, 1000.0, 1000.0, 2000.0, 2000.0, 2000.0, 2000.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "child3_extra": [0, 0, 0, 0, 0, 0, 0, 120.0, 120.0, 120.0, 120.0, 120.0, 120.0, 200.0, 200.0, 350.0, 500.0, 500.0, 700.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}, "dorm": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 600.0, 600.0, 1200.0, 1200.0, 600.0, 600.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "medical": {"us": [0, 0, 0, 536.0, 30.0, 315.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0, 70.0], "gfather_p": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1000.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0], "gmother_p": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1000.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0], "gfather_m": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1000.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0], "gmother_m": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1000.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0, 100.0]}, "housing_opt1_loanPayment": [0, 0, 1404.0, 1830.0, 1830.0, 1830.0, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 1830, 0, 0, 0, 0], "housing_opt1_loanDeduction": [0, 0, 400.0, 400.0, 400.0, 400.0, 400, 400, 400, 400, 400, 400, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "housing_opt1_propertyTax": [0, 0, 150.0, 130.0, 134.0, 135.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0], "housing_opt1_insurance": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "housing_opt1_repair": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 200.0, 0, 0, 0, 0, 200.0, 0, 0, 0, 0, 200.0, 0, 0, 0, 0, 2000, 0, 0, 0, 0, 200.0, 0, 0, 0, 0, 2000.0, 0, 0, 0, 0, 200.0], "housing_opt2_rent_relocate": [396.0, 396.0, 396.0, 396.0, 396.0, 396.0, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 1540, 1540, 1540, 1540, 1540, 1540, 1540, 1540, 1540, 1540, 1540, 1540, 1540, 1540, 1540, 1540, 1540, 1540], "housing_opt3_used_condo": [396.0, 396.0, 396.0, 396.0, 396.0, 396.0, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160, 2160], "housing_opt4_rent_to_condo": [396.0, 396.0, 396.0, 396.0, 396.0, 396.0, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 2100, 30000, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360, 360], "car": {"body": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5000.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "parking": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "gas": [60.0, 60.0, 60.0, 60.0, 60.0, 42.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0], "insurance": [80.0, 80.0, 80.0, 80.0, 80.0, 28.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0], "tax": [40.0, 40.0, 40.0, 40.0, 40.0, 35.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0], "inspection": [0, 80.0, 0, 80.0, 0, 0, 0, 80, 0, 80, 0, 80, 0, 80, 0, 80, 0, 80, 0, 80, 0, 80, 0, 80, 0, 80, 0, 80, 0, 80, 0, 80, 0, 80, 0, 80, 80, 80, 80, 80, 80], "other": [10.0, 10.0, 10.0, 10.0, 10.0, 142.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0]}, "living": {"food": [432.0, 480.0, 480.0, 395.0, 500.0, 627.0, 576.0, 636.0, 740.0, 830.0, 984.0, 1101.0, 1131.0, 1131.0, 1230.0, 1230.0, 1308.0, 1068.0, 1068.0, 1068.0, 1068.0, 708.0, 708.0, 240.0, 240.0, 240.0, 240.0, 240.0, 240.0, 240.0, 240.0, 240.0, 240.0, 240.0, 240.0, 240.0, 240.0, 240.0, 240.0, 240.0, 240.0], "utilities": [300.0, 300.0, 300.0, 252.0, 300.0, 290.0, 350.0, 350.0, 350.0, 350.0, 350.0, 350.0, 350.0, 350.0, 350.0, 350.0, 350.0, 350.0, 350.0, 300.0, 300.0, 300.0, 300.0, 200.0, 200.0, 200.0, 200.0, 200.0, 200.0, 200.0, 200.0, 200.0, 200.0, 200.0, 200.0, 200.0, 200.0, 200.0, 200.0, 200.0, 200.0], "communication": [120.0, 120.0, 120.0, 89.0, 70.0, 71.0, 120, 180, 180, 180, 180, 240, 240, 300, 300, 300, 300, 240, 240, 240, 240, 180, 180, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120, 120], "daily_goods": [200.0, 200.0, 200.0, 356.0, 350.0, 412.0, 250.0, 250.0, 250.0, 250.0, 250.0, 250.0, 250.0, 250.0, 250.0, 250.0, 250.0, 250.0, 250.0, 200.0, 200.0, 200.0, 200.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0, 150.0]}, "social": [720.0, 720.0, 720.0, 791.0, 676.0, 567.0, 960, 960, 960, 960, 960, 960, 960, 960, 960, 960, 960, 960, 960, 960, 1960, 960, 960, 960, 960, 960, 0, 0, 1000.0, 0, 1000.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "leisure": [300.0, 300.0, 300.0, 70.0, 110.0, 113.0, 300.0, 300.0, 300.0, 300.0, 1000.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 1000.0, 300.0, 300.0, 300.0, 300.0, 1000.0, 500.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0, 300.0], "other": [120.0, 144.0, 144.0, 120.0, 264.0, 330.0, 180, 204, 228, 240, 312, 336, 336, 360, 420, 420, 480, 360, 360, 360, 360, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240], "sudden": [0.0, 0.0, 500.0, 0.0, 0.0, 0.0, 0.0, 0.0, 500.0, 0.0, 0.0, 500.0, 0.0, 0.0, 500.0, 0.0, 0.0, 500.0, 0.0, 0.0, 500.0, 0.0, 0.0, 500.0, 0.0, 0.0, 500.0, 0.0, 0.0, 500.0, 0.0, 0.0, 500.0, 0.0, 0.0, 500.0, 0, 0, 500.0, 0, 0]}, "income": {"father": [6500.0, 6500.0, 6500.0, 6524.0, 6990.0, 7219.0, 7219, 7219, 7219, 7219, 7219, 7219, 7219, 7219, 7219, 7219, 7219, 7219, 7219, 7219, 7219, 7219, 7219, 7219, 7219, 7219, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "mother": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "taxRefund": [0, 0, 0, 512.0, 0, 251.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "other_childAllowance": [0, 0, 0, 1259.0, 1310.0, 1963.0, 1700, 600, 600, 600, 600, 600, 600, 480, 480, 480, 480, 360.0, 360.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "pension_retirement": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 20000.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}}, "portfolio": {"usdjpy": 153.239, "holdings": [{"account": "楽天*父", "exchange": "NYSEARCA", "ticker": "VYM", "name": "Vanguard High Dividend Yield Index Fund ETF", "qty": 0.0, "avgJpyTotal": 0, "priceUsdUnit": 163.52, "priceJpyUnit": 25057.641280000003, "valueJpy": 0, "assetCat": "株式", "subClass": "米国", "tags": ["ETF", "高配当", "コア資産"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:VYM", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NYSEARCA", "ticker": "VHT", "name": "Vanguard Health Care Index Fund ETF", "qty": 0.0, "avgJpyTotal": 0, "priceUsdUnit": 314.61, "priceJpyUnit": 48210.521790000006, "valueJpy": 0, "assetCat": "株式", "subClass": "米国", "tags": ["ETF", "ディフェンシブ"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:VHT", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NYSEARCA", "ticker": "SPYD", "name": "State Street SPDR Portfolio S&P 500 High Dvd ETF", "qty": 16.0, "avgJpyTotal": 57236, "priceUsdUnit": 49.18, "priceJpyUnit": 7536.29402, "valueJpy": 120580.7043, "assetCat": "株式", "subClass": "米国", "tags": ["ETF", "高配当"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:SPYD", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NASDAQ", "ticker": "IBB", "name": "iShares Biotechnology ETF", "qty": 0.0, "avgJpyTotal": 0, "priceUsdUnit": 207.33, "priceJpyUnit": 31771.041870000005, "valueJpy": 0, "assetCat": "株式", "subClass": "米国", "tags": ["ETF", "グロース", "ハイテク"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NASDAQ:IBB", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NYSEARCA", "ticker": "HDV", "name": "iShares Core High Dividend ETF", "qty": 0.0, "avgJpyTotal": 0, "priceUsdUnit": 29.19, "priceJpyUnit": 4473.04641, "valueJpy": 0, "assetCat": "株式", "subClass": "米国", "tags": ["ETF", "高配当", "連続増配"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:HDV", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NASDAQ", "ticker": "TLT", "name": "iShares 20+ Year Treasury Bond ETF", "qty": 667.0, "avgJpyTotal": 10308124.82, "priceUsdUnit": 82.2, "priceJpyUnit": 12596.2458, "valueJpy": 8401695.949, "assetCat": "債権", "subClass": "米国債", "tags": ["ETF", "ディフェンシブ"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NASDAQ:TLT", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI父", "exchange": "NASDAQ", "ticker": "TLT", "name": "iShares 20+ Year Treasury Bond ETF", "qty": 76, "avgJpyTotal": 1037172, "priceUsdUnit": 82.2, "priceJpyUnit": 12596.2458, "valueJpy": 957314.6808, "assetCat": "債権", "subClass": "米国債", "tags": ["ETF", "ディフェンシブ"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NASDAQ:TLT", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NYSEARCA", "ticker": "GLD", "name": "SPDR Gold Trust", "qty": 189.0, "avgJpyTotal": 3534553.26, "priceUsdUnit": 399.72, "priceJpyUnit": 61252.693080000005, "valueJpy": 11576758.99, "assetCat": "コモディティ", "subClass": "貴金属", "tags": ["ETF", "インフレ耐性", "ディフェンシブ"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:GLD", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NASDAQ", "ticker": "BND", "name": "Vanguard Total Bond Market Index Fund ETF", "qty": 365.0, "avgJpyTotal": 3736125.4, "priceUsdUnit": 71.89, "priceJpyUnit": 11016.35171, "valueJpy": 4020968.374, "assetCat": "債権", "subClass": "米国債", "tags": ["ETF", "ディフェンシブ", "コア資産"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NASDAQ:BND", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NYSEARCA", "ticker": "DBA", "name": "Invesco DB Agriculture Fund", "qty": 610.0, "avgJpyTotal": 1054055.6, "priceUsdUnit": 29.13, "priceJpyUnit": 4463.85207, "valueJpy": 2722949.763, "assetCat": "コモディティ", "subClass": "農作物", "tags": ["ETF", "インフレ耐性"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:DBA", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NYSEARCA", "ticker": "EIDO", "name": "iShares MSCI Indonesia ETF", "qty": 445.0, "avgJpyTotal": 1048624.7, "priceUsdUnit": 13.22, "priceJpyUnit": 2025.81958, "valueJpy": 901489.7131, "assetCat": "株式", "subClass": "新興国", "tags": ["ETF", "サテライト資産"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:EIDO", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NYSEARCA", "ticker": "EPI", "name": "WisdomTree India Earnings Fund", "qty": 107.0, "avgJpyTotal": 374321.31, "priceUsdUnit": 42.68, "priceJpyUnit": 6540.24052, "valueJpy": 699805.7356, "assetCat": "株式", "subClass": "新興国", "tags": ["ETF", "サテライト資産", "グロース"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:EPI", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NASDAQ", "ticker": "VCIT", "name": "Vanguard Intermediate-Term Corp Bond Idx Fund ETF", "qty": 0.0, "avgJpyTotal": 0, "priceUsdUnit": 80.46, "priceJpyUnit": 12329.60994, "valueJpy": 0, "assetCat": "債権", "subClass": "社債", "tags": ["ETF", "ディフェンシブ"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NASDAQ:VCIT", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NYSEARCA", "ticker": "VWO", "name": "Vanguard Emerging Markets Stock Index Fund ETF", "qty": 0.0, "avgJpyTotal": 0, "priceUsdUnit": 61.23, "priceJpyUnit": 9382.82397, "valueJpy": 0, "assetCat": "株式", "subClass": "新興国", "tags": ["ETF", "サテライト資産"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:VWO", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NYSEARCA", "ticker": "AFK", "name": "VanEck Africa Index ETF", "qty": 150.0, "avgJpyTotal": 366495, "priceUsdUnit": 29.94, "priceJpyUnit": 4587.97566, "valueJpy": 688196.349, "assetCat": "株式", "subClass": "新興国", "tags": ["ETF", "サテライト資産"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:AFK", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NYSE", "ticker": "HES", "name": "#N/A", "qty": 0.0, "avgJpyTotal": 0, "priceUsdUnit": null, "priceJpyUnit": null, "valueJpy": 0, "assetCat": "株式", "subClass": "米国", "tags": ["個別銘柄", "インフレ耐性"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSE:HES", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "TYO", "ticker": 1628.0, "name": "TYO:1628", "qty": 220.0, "avgJpyTotal": 3151099.6, "priceUsdUnit": 22115, "priceJpyUnit": 22115, "valueJpy": 4865300, "assetCat": "株式", "subClass": "国内", "tags": ["ETF"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:1628.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "TYO", "ticker": 1628.0, "name": "TYO:1628", "qty": 35000.0, "avgJpyTotal": 3045000, "priceUsdUnit": 274, "priceJpyUnit": 274, "valueJpy": 9590000, "assetCat": "株式", "subClass": "国内", "tags": ["ETF"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:1628.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "TYO", "ticker": 2288.0, "name": "TYO:2288", "qty": 300.0, "avgJpyTotal": 507534, "priceUsdUnit": 2254, "priceJpyUnit": 2254, "valueJpy": 676200, "assetCat": "株式", "subClass": "国内", "tags": ["個別銘柄"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:2288.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI父", "exchange": "TYO", "ticker": 1655.0, "name": "TYO:1655", "qty": 3000.0, "avgJpyTotal": 1980000, "priceUsdUnit": 843.3, "priceJpyUnit": 843.3, "valueJpy": 2529900, "assetCat": "株式", "subClass": "米国", "tags": ["個別銘柄", "コア資産"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:1655.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI父", "exchange": "TYO", "ticker": 2222.0, "name": "TYO:2222", "qty": 100.0, "avgJpyTotal": 219000, "priceUsdUnit": 1983.5, "priceJpyUnit": 1983.5, "valueJpy": 198350, "assetCat": "株式", "subClass": "国内", "tags": ["個別銘柄"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:2222.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI父", "exchange": "TYO", "ticker": 3139.0, "name": "TYO:3139", "qty": 100.0, "avgJpyTotal": 298000, "priceUsdUnit": 3210, "priceJpyUnit": 3210, "valueJpy": 321000, "assetCat": "株式", "subClass": "国内", "tags": ["個別銘柄"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:3139.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI母", "exchange": "TYO", "ticker": 4967.0, "name": "TYO:4967", "qty": 200.0, "avgJpyTotal": 1177000, "priceUsdUnit": 5515, "priceJpyUnit": 5515, "valueJpy": 1103000, "assetCat": "株式", "subClass": "国内", "tags": ["個別銘柄"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:4967.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI母", "exchange": "TYO", "ticker": 7202.0, "name": "TYO:7202", "qty": 200.0, "avgJpyTotal": 405800, "priceUsdUnit": 2163, "priceJpyUnit": 2163, "valueJpy": 432600, "assetCat": "株式", "subClass": "国内", "tags": ["個別銘柄"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:7202.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI母", "exchange": "TYO", "ticker": 9003.0, "name": "TYO:9003", "qty": 200.0, "avgJpyTotal": 487600, "priceUsdUnit": 2422, "priceJpyUnit": 2422, "valueJpy": 484400, "assetCat": "株式", "subClass": "国内", "tags": ["個別銘柄"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:9003.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI父", "exchange": "TYO", "ticker": 3281.0, "name": "TYO:3281", "qty": 14.0, "avgJpyTotal": 34132, "priceUsdUnit": 133700, "priceJpyUnit": 133700, "valueJpy": 1871800, "assetCat": "株式", "subClass": "国内", "tags": ["個別銘柄"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:3281.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "TYO", "ticker": 2621.0, "name": "TYO:2621", "qty": 4500.0, "avgJpyTotal": 5130000, "priceUsdUnit": 1050, "priceJpyUnit": 1050, "valueJpy": 4725000, "assetCat": "債権", "subClass": "米国債", "tags": ["個別銘柄", "ディフェンシブ"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:2621.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*母", "exchange": "TYO", "ticker": 2621.0, "name": "TYO:2621", "qty": 4000.0, "avgJpyTotal": 4560000, "priceUsdUnit": 1050, "priceJpyUnit": 1050, "valueJpy": 4200000, "assetCat": "債権", "subClass": "米国債", "tags": ["個別銘柄", "ディフェンシブ"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:2621.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI母", "exchange": "TYO", "ticker": 2621.0, "name": "TYO:2621", "qty": 2061.0, "avgJpyTotal": 2349540, "priceUsdUnit": 1050, "priceJpyUnit": 1050, "valueJpy": 2164050, "assetCat": "債権", "subClass": "米国債", "tags": ["個別銘柄", "ディフェンシブ"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:2621.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI父", "exchange": "", "ticker": "eMAXIS 国内TPX", "name": "eMAXIS 国内TPX", "qty": 1.0, "avgJpyTotal": 1000097.663, "priceUsdUnit": 31175, "priceJpyUnit": 31175, "valueJpy": 3061774.0, "assetCat": "株式", "subClass": "国内", "tags": ["投信", "コア資産", "積立中"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "eMAXIS 国内TPX", "qtyMode": "nav10000", "unitsImplied": 982124.7795, "lastUpdated": null}, {"account": "SBI父", "exchange": "", "ticker": "eMAXIS 先進国", "name": "eMAXIS 先進国", "qty": 1.0, "avgJpyTotal": 7248889.742, "priceUsdUnit": 43436, "priceJpyUnit": 43436, "valueJpy": 17269788.0, "assetCat": "株式", "subClass": "先進国", "tags": ["投信", "コア資産", "積立中"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "eMAXIS 先進国", "qtyMode": "nav10000", "unitsImplied": 3975915.83, "lastUpdated": null}, {"account": "SBI父", "exchange": "", "ticker": "eMAXIS 米国", "name": "eMAXIS 米国", "qty": 0.0, "avgJpyTotal": 0, "priceUsdUnit": null, "priceJpyUnit": null, "valueJpy": 0, "assetCat": "株式", "subClass": "米国", "tags": ["投信", "コア資産", "積立中"], "memo": "", "currency": "円建", "autoFetchable": false, "searchLabel": null, "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI父", "exchange": "", "ticker": "eMAXIS 米国", "name": "eMAXIS 米国", "qty": 1.0, "avgJpyTotal": 638725.6509, "priceUsdUnit": 42853, "priceJpyUnit": 42853, "valueJpy": 821320.0, "assetCat": "株式", "subClass": "米国", "tags": ["投信", "コア資産", "積立中"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "eMAXIS 米国", "qtyMode": "nav10000", "unitsImplied": 191659.8605, "lastUpdated": null}, {"account": "SBI父", "exchange": "", "ticker": "eMAXIS 先進国", "name": "eMAXIS 先進国", "qty": 0.0, "avgJpyTotal": 0, "priceUsdUnit": null, "priceJpyUnit": null, "valueJpy": 0, "assetCat": "株式", "subClass": "先進国", "tags": ["投信", "コア資産", "積立中"], "memo": "", "currency": "円建", "autoFetchable": false, "searchLabel": null, "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI母", "exchange": "", "ticker": "SP500", "name": "SP500", "qty": 1.0, "avgJpyTotal": 466672.038, "priceUsdUnit": 3.9775, "priceJpyUnit": 3.9775, "valueJpy": 665157.325, "assetCat": "株式", "subClass": "米国", "tags": ["投信", "コア資産", "積立中"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "SP500", "qtyMode": "nav10000", "unitsImplied": 1672300000, "lastUpdated": null}, {"account": "SBI母", "exchange": "", "ticker": "SP500", "name": "SP500", "qty": 1.0, "avgJpyTotal": 1533349.671, "priceUsdUnit": 3.9775, "priceJpyUnit": 3.9775, "valueJpy": 4044898.738, "assetCat": "株式", "subClass": "米国", "tags": ["投信", "コア資産", "積立中"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "SP500", "qtyMode": "nav10000", "unitsImplied": 10169450000.0, "lastUpdated": null}, {"account": "SBI母", "exchange": "", "ticker": "eMAXIS 米国", "name": "eMAXIS 米国", "qty": 1.0, "avgJpyTotal": 40000.8731, "priceUsdUnit": 4.3497, "priceJpyUnit": 4.3497, "valueJpy": 58255.5321, "assetCat": "株式", "subClass": "米国", "tags": ["投信", "コア資産", "積立中"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "eMAXIS 米国", "qtyMode": "nav10000", "unitsImplied": 133930000.0, "lastUpdated": null}, {"account": "SBI母", "exchange": "", "ticker": "eMAXIS オルカン", "name": "eMAXIS オルカン", "qty": 1.0, "avgJpyTotal": 500004.494, "priceUsdUnit": 3.7227, "priceJpyUnit": 3.7227, "valueJpy": 538901.7747, "assetCat": "株式", "subClass": "米国", "tags": ["投信", "コア資産", "積立中"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "eMAXIS オルカン", "qtyMode": "nav10000", "unitsImplied": 1447610000.0, "lastUpdated": null}, {"account": "SBI父", "exchange": "", "ticker": "eMAXIS オルカン", "name": "eMAXIS オルカン", "qty": 1.0, "avgJpyTotal": 500004.494, "priceUsdUnit": 3.7227, "priceJpyUnit": 3.7227, "valueJpy": 538901.7747, "assetCat": "株式", "subClass": "米国", "tags": ["投信", "コア資産", "積立中"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "eMAXIS オルカン", "qtyMode": "nav10000", "unitsImplied": 1447610000.0, "lastUpdated": null}, {"account": "SBI子供1", "exchange": "NYSEARCA", "ticker": "SPY", "name": "State Street SPDR S&P 500 ETF Trust", "qty": 17.0, "avgJpyTotal": 60813.25, "priceUsdUnit": 765.96, "priceJpyUnit": 117374.94444, "valueJpy": 1995374.055, "assetCat": "株式", "subClass": "米国", "tags": ["ETF", "コア資産"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:SPY", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI子供1", "exchange": "NASDAQ", "ticker": "TLT", "name": "iShares 20+ Year Treasury Bond ETF", "qty": 30.0, "avgJpyTotal": 409410, "priceUsdUnit": 82.2, "priceJpyUnit": 12596.2458, "valueJpy": 377887.374, "assetCat": "債権", "subClass": "米国債", "tags": ["ETF", "ディフェンシブ"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NASDAQ:TLT", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI子供2", "exchange": "NYSEARCA", "ticker": "SPY", "name": "State Street SPDR S&P 500 ETF Trust", "qty": 17.0, "avgJpyTotal": 60813.25, "priceUsdUnit": 765.96, "priceJpyUnit": 117374.94444, "valueJpy": 1995374.055, "assetCat": "株式", "subClass": "米国", "tags": ["ETF", "コア資産"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:SPY", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI子供2", "exchange": "NASDAQ", "ticker": "TLT", "name": "iShares 20+ Year Treasury Bond ETF", "qty": 30.0, "avgJpyTotal": 409410, "priceUsdUnit": 82.2, "priceJpyUnit": 12596.2458, "valueJpy": 377887.374, "assetCat": "債権", "subClass": "米国債", "tags": ["ETF", "ディフェンシブ"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NASDAQ:TLT", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI子供3", "exchange": "NYSEARCA", "ticker": "SPY", "name": "State Street SPDR S&P 500 ETF Trust", "qty": 17.0, "avgJpyTotal": 60813.25, "priceUsdUnit": 765.96, "priceJpyUnit": 117374.94444, "valueJpy": 1995374.055, "assetCat": "株式", "subClass": "米国", "tags": ["ETF", "コア資産"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:SPY", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI子供3", "exchange": "NASDAQ", "ticker": "TLT", "name": "iShares 20+ Year Treasury Bond ETF", "qty": 30.0, "avgJpyTotal": 409410, "priceUsdUnit": 82.2, "priceJpyUnit": 12596.2458, "valueJpy": 377887.374, "assetCat": "債権", "subClass": "米国債", "tags": ["ETF", "ディフェンシブ"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NASDAQ:TLT", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "ｺｲﾝﾁｪｯｸ", "exchange": "", "ticker": "BTC", "name": "BTC", "qty": 0.6158491, "avgJpyTotal": 2000000, "priceUsdUnit": 12175243.1, "priceJpyUnit": 12175243.1, "valueJpy": 7498112.505, "assetCat": "仮想通貨", "subClass": null, "tags": ["仮想通貨", "サテライト資産"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "BTC", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "ｺｲﾝﾁｪｯｸ", "exchange": "", "ticker": "ETH", "name": "ETH", "qty": 5.2632, "avgJpyTotal": 1000000, "priceUsdUnit": 385589.9488, "priceJpyUnit": 385589.9488, "valueJpy": 2029437.019, "assetCat": "仮想通貨", "subClass": null, "tags": ["仮想通貨", "サテライト資産"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "ETH", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "iDeco", "exchange": "", "ticker": "", "name": "iDeco", "qty": 1.0, "avgJpyTotal": 0, "priceUsdUnit": 1600000, "priceJpyUnit": 1600000, "valueJpy": 1600000, "assetCat": "株式", "subClass": "先進国", "tags": ["投信", "積立中", "コア資産"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "iDeco", "qtyMode": "nav10000", "unitsImplied": 10000.0, "lastUpdated": null}, {"account": "楽天*父", "exchange": "", "ticker": "ちゃいかぶ", "name": "ちゃいかぶ", "qty": 1.0, "avgJpyTotal": 1000000, "priceUsdUnit": 2540000.0, "priceJpyUnit": 389227060.0, "valueJpy": 2540000, "assetCat": "株式", "subClass": "新興国", "tags": ["ETF", "サテライト資産"], "memo": "", "currency": "ドル建", "autoFetchable": false, "searchLabel": null, "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}]}, "cash": [{"bank": "住信SBI", "amount": 4000000}, {"bank": "", "amount": 100000}, {"bank": "住信SBI", "amount": 1313714}, {"bank": "楽天銀行", "amount": 6730000}, {"bank": "ゆうちょ", "amount": 2260000}, {"bank": "みずほローン口座", "amount": 5568000}, {"bank": "買い付け余力", "amount": 2006062}, {"bank": "買い付け余力", "amount": 1476000}, {"bank": "買い付け余力", "amount": 600000}, {"bank": "買い付け余力", "amount": 600000}, {"bank": "買い付け余力", "amount": 600000}], "init": {"securities0": 38000.0, "cash0": 17000.0}};
+const RAW = {"sim": {"years": [2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035, 2036, 2037, 2038, 2039, 2040, 2041, 2042, 2043, 2044, 2045, 2046, 2047, 2048, 2049, 2050, 2051, 2052, 2053, 2054, 2055, 2056, 2057, 2058, 2059, 2060], "params": {"housingType": 1.0, "loanInitial": 6000.0, "loanRate": 0.01, "buildingInitial": 2000.0, "landInitial": 4000.0, "dividendRate": 0.01, "growthRate": 1.03, "realEstateFlag": "無", "initAssetSecurities2019": null, "repairNotes": null}, "expense": {"tuition": {"child1": [15.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 50.0, 50.0, 50.0, 50.0, 50.0, 50.0, 200.0, 200.0, 200.0, 200.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "child1_extra": [0.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 20.0, 20.0, 35.0, 50.0, 50.0, 70.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "child2": [0.0, 0.0, 15.0, 15.0, 15.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 50.0, 50.0, 50.0, 50.0, 50.0, 50.0, 200.0, 200.0, 200.0, 200.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "child2_extra": [0.0, 0.0, 0.0, 0.0, 0.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 20.0, 20.0, 35.0, 50.0, 50.0, 70.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "child3": [0.0, 0.0, 0.0, 0.0, 15.0, 15.0, 15.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 50.0, 50.0, 50.0, 50.0, 100.0, 100.0, 200.0, 200.0, 200.0, 200.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "child3_extra": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 20.0, 20.0, 35.0, 50.0, 50.0, 70.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}, "dorm": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 60.0, 60.0, 120.0, 120.0, 60.0, 60.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "medical": {"us": [0.0, 0.0, 0.0, 53.6, 3.0, 31.5, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 7.0], "gfather_p": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0], "gmother_p": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0], "gfather_m": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0], "gmother_m": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0]}, "housing_opt1_loanPayment": [0.0, 0.0, 140.4, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 183.0, 0.0, 0.0, 0.0, 0.0], "housing_opt1_loanDeduction": [0.0, 0.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 40.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "housing_opt1_propertyTax": [0.0, 0.0, 15.0, 13.0, 13.4, 13.5, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0], "housing_opt1_insurance": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "housing_opt1_repair": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 0.0, 200.0, 0.0, 0.0, 0.0, 0.0, 20.0, 0.0, 0.0, 0.0, 0.0, 200.0, 0.0, 0.0, 0.0, 0.0, 20.0], "housing_opt2_rent_relocate": [39.6, 39.6, 39.6, 39.6, 39.6, 39.6, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 154.0, 154.0, 154.0, 154.0, 154.0, 154.0, 154.0, 154.0, 154.0, 154.0, 154.0, 154.0, 154.0, 154.0, 154.0, 154.0, 154.0, 154.0], "housing_opt3_used_condo": [39.6, 39.6, 39.6, 39.6, 39.6, 39.6, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0, 216.0], "housing_opt4_rent_to_condo": [39.6, 39.6, 39.6, 39.6, 39.6, 39.6, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 210.0, 3000.0, 36.0, 36.0, 36.0, 36.0, 36.0, 36.0, 36.0, 36.0, 36.0, 36.0, 36.0, 36.0, 36.0, 36.0, 36.0], "car": {"body": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 500.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "parking": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "gas": [6.0, 6.0, 6.0, 6.0, 6.0, 4.2, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0, 6.0], "insurance": [8.0, 8.0, 8.0, 8.0, 8.0, 2.8, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0], "tax": [4.0, 4.0, 4.0, 4.0, 4.0, 3.5, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0, 4.0], "inspection": [0.0, 8.0, 0.0, 8.0, 0.0, 0.0, 0.0, 8.0, 0.0, 8.0, 0.0, 8.0, 0.0, 8.0, 0.0, 8.0, 0.0, 8.0, 0.0, 8.0, 0.0, 8.0, 0.0, 8.0, 0.0, 8.0, 0.0, 8.0, 0.0, 8.0, 0.0, 8.0, 0.0, 8.0, 0.0, 8.0, 8.0, 8.0, 8.0, 8.0, 8.0], "other": [1.0, 1.0, 1.0, 1.0, 1.0, 14.2, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]}, "living": {"food": [43.2, 48.0, 48.0, 39.5, 50.0, 62.7, 57.6, 63.6, 74.0, 83.0, 98.4, 110.1, 113.1, 113.1, 123.0, 123.0, 130.8, 106.8, 106.8, 106.8, 106.8, 70.8, 70.8, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0], "utilities": [30.0, 30.0, 30.0, 25.2, 30.0, 29.0, 35.0, 35.0, 35.0, 35.0, 35.0, 35.0, 35.0, 35.0, 35.0, 35.0, 35.0, 35.0, 35.0, 30.0, 30.0, 30.0, 30.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0, 20.0], "communication": [12.0, 12.0, 12.0, 8.9, 7.0, 7.1, 12.0, 18.0, 18.0, 18.0, 18.0, 24.0, 24.0, 30.0, 30.0, 30.0, 30.0, 24.0, 24.0, 24.0, 24.0, 18.0, 18.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0, 12.0], "daily_goods": [20.0, 20.0, 20.0, 35.6, 35.0, 41.2, 25.0, 25.0, 25.0, 25.0, 25.0, 25.0, 25.0, 25.0, 25.0, 25.0, 25.0, 25.0, 25.0, 20.0, 20.0, 20.0, 20.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0, 15.0]}, "social": [72.0, 72.0, 72.0, 79.1, 67.6, 56.7, 96.0, 96.0, 96.0, 96.0, 96.0, 96.0, 96.0, 96.0, 96.0, 96.0, 96.0, 96.0, 96.0, 96.0, 196.0, 96.0, 96.0, 96.0, 96.0, 96.0, 0.0, 0.0, 100.0, 0.0, 100.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "leisure": [30.0, 30.0, 30.0, 7.0, 11.0, 11.3, 30.0, 30.0, 30.0, 30.0, 100.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 100.0, 30.0, 30.0, 30.0, 30.0, 100.0, 50.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0], "other": [12.0, 14.4, 14.4, 12.0, 26.4, 33.0, 18.0, 20.4, 22.8, 24.0, 31.2, 33.6, 33.6, 36.0, 42.0, 42.0, 48.0, 36.0, 36.0, 36.0, 36.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0, 24.0], "sudden": [0.0, 0.0, 50.0, 0.0, 0.0, 0.0, 0.0, 0.0, 50.0, 0.0, 0.0, 50.0, 0.0, 0.0, 50.0, 0.0, 0.0, 50.0, 0.0, 0.0, 50.0, 0.0, 0.0, 50.0, 0.0, 0.0, 50.0, 0.0, 0.0, 50.0, 0.0, 0.0, 50.0, 0.0, 0.0, 50.0, 0.0, 0.0, 50.0, 0.0, 0.0]}, "income": {"father": [650.0, 650.0, 650.0, 652.4, 699.0, 721.9, 721.9, 721.9, 721.9, 721.9, 721.9, 721.9, 721.9, 721.9, 721.9, 721.9, 721.9, 721.9, 721.9, 721.9, 721.9, 721.9, 721.9, 721.9, 721.9, 721.9, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "mother": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "taxRefund": [0.0, 0.0, 0.0, 51.2, 0.0, 25.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "other_childAllowance": [0.0, 0.0, 0.0, 125.9, 131.0, 196.3, 170.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 48.0, 48.0, 48.0, 48.0, 36.0, 36.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], "pension_retirement": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2000.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}}, "portfolio": {"usdjpy": 153.239, "holdings": [{"account": "楽天*父", "exchange": "NYSEARCA", "ticker": "VYM", "name": "Vanguard High Dividend Yield Index Fund ETF", "qty": 0.0, "avgJpyTotal": 0, "priceUsdUnit": 163.52, "priceJpyUnit": 25057.641280000003, "valueJpy": 0, "assetCat": "株式", "subClass": "米国", "tags": ["ETF", "高配当", "コア資産"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:VYM", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NYSEARCA", "ticker": "VHT", "name": "Vanguard Health Care Index Fund ETF", "qty": 0.0, "avgJpyTotal": 0, "priceUsdUnit": 314.61, "priceJpyUnit": 48210.521790000006, "valueJpy": 0, "assetCat": "株式", "subClass": "米国", "tags": ["ETF", "ディフェンシブ"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:VHT", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NYSEARCA", "ticker": "SPYD", "name": "State Street SPDR Portfolio S&P 500 High Dvd ETF", "qty": 16.0, "avgJpyTotal": 57236, "priceUsdUnit": 49.18, "priceJpyUnit": 7536.29402, "valueJpy": 120580.7043, "assetCat": "株式", "subClass": "米国", "tags": ["ETF", "高配当"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:SPYD", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NASDAQ", "ticker": "IBB", "name": "iShares Biotechnology ETF", "qty": 0.0, "avgJpyTotal": 0, "priceUsdUnit": 207.33, "priceJpyUnit": 31771.041870000005, "valueJpy": 0, "assetCat": "株式", "subClass": "米国", "tags": ["ETF", "グロース", "ハイテク"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NASDAQ:IBB", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NYSEARCA", "ticker": "HDV", "name": "iShares Core High Dividend ETF", "qty": 0.0, "avgJpyTotal": 0, "priceUsdUnit": 29.19, "priceJpyUnit": 4473.04641, "valueJpy": 0, "assetCat": "株式", "subClass": "米国", "tags": ["ETF", "高配当", "連続増配"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:HDV", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NASDAQ", "ticker": "TLT", "name": "iShares 20+ Year Treasury Bond ETF", "qty": 667.0, "avgJpyTotal": 10308124.82, "priceUsdUnit": 82.2, "priceJpyUnit": 12596.2458, "valueJpy": 8401695.949, "assetCat": "債権", "subClass": "米国債", "tags": ["ETF", "ディフェンシブ"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NASDAQ:TLT", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI父", "exchange": "NASDAQ", "ticker": "TLT", "name": "iShares 20+ Year Treasury Bond ETF", "qty": 76, "avgJpyTotal": 1037172, "priceUsdUnit": 82.2, "priceJpyUnit": 12596.2458, "valueJpy": 957314.6808, "assetCat": "債権", "subClass": "米国債", "tags": ["ETF", "ディフェンシブ"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NASDAQ:TLT", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NYSEARCA", "ticker": "GLD", "name": "SPDR Gold Trust", "qty": 189.0, "avgJpyTotal": 3534553.26, "priceUsdUnit": 399.72, "priceJpyUnit": 61252.693080000005, "valueJpy": 11576758.99, "assetCat": "コモディティ", "subClass": "貴金属", "tags": ["ETF", "インフレ耐性", "ディフェンシブ"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:GLD", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NASDAQ", "ticker": "BND", "name": "Vanguard Total Bond Market Index Fund ETF", "qty": 365.0, "avgJpyTotal": 3736125.4, "priceUsdUnit": 71.89, "priceJpyUnit": 11016.35171, "valueJpy": 4020968.374, "assetCat": "債権", "subClass": "米国債", "tags": ["ETF", "ディフェンシブ", "コア資産"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NASDAQ:BND", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NYSEARCA", "ticker": "DBA", "name": "Invesco DB Agriculture Fund", "qty": 610.0, "avgJpyTotal": 1054055.6, "priceUsdUnit": 29.13, "priceJpyUnit": 4463.85207, "valueJpy": 2722949.763, "assetCat": "コモディティ", "subClass": "農作物", "tags": ["ETF", "インフレ耐性"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:DBA", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NYSEARCA", "ticker": "EIDO", "name": "iShares MSCI Indonesia ETF", "qty": 445.0, "avgJpyTotal": 1048624.7, "priceUsdUnit": 13.22, "priceJpyUnit": 2025.81958, "valueJpy": 901489.7131, "assetCat": "株式", "subClass": "新興国", "tags": ["ETF", "サテライト資産"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:EIDO", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NYSEARCA", "ticker": "EPI", "name": "WisdomTree India Earnings Fund", "qty": 107.0, "avgJpyTotal": 374321.31, "priceUsdUnit": 42.68, "priceJpyUnit": 6540.24052, "valueJpy": 699805.7356, "assetCat": "株式", "subClass": "新興国", "tags": ["ETF", "サテライト資産", "グロース"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:EPI", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NASDAQ", "ticker": "VCIT", "name": "Vanguard Intermediate-Term Corp Bond Idx Fund ETF", "qty": 0.0, "avgJpyTotal": 0, "priceUsdUnit": 80.46, "priceJpyUnit": 12329.60994, "valueJpy": 0, "assetCat": "債権", "subClass": "社債", "tags": ["ETF", "ディフェンシブ"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NASDAQ:VCIT", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NYSEARCA", "ticker": "VWO", "name": "Vanguard Emerging Markets Stock Index Fund ETF", "qty": 0.0, "avgJpyTotal": 0, "priceUsdUnit": 61.23, "priceJpyUnit": 9382.82397, "valueJpy": 0, "assetCat": "株式", "subClass": "新興国", "tags": ["ETF", "サテライト資産"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:VWO", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NYSEARCA", "ticker": "AFK", "name": "VanEck Africa Index ETF", "qty": 150.0, "avgJpyTotal": 366495, "priceUsdUnit": 29.94, "priceJpyUnit": 4587.97566, "valueJpy": 688196.349, "assetCat": "株式", "subClass": "新興国", "tags": ["ETF", "サテライト資産"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:AFK", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "NYSE", "ticker": "HES", "name": "#N/A", "qty": 0.0, "avgJpyTotal": 0, "priceUsdUnit": null, "priceJpyUnit": null, "valueJpy": 0, "assetCat": "株式", "subClass": "米国", "tags": ["個別銘柄", "インフレ耐性"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSE:HES", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "TYO", "ticker": 1628.0, "name": "TYO:1628", "qty": 220.0, "avgJpyTotal": 3151099.6, "priceUsdUnit": 22115, "priceJpyUnit": 22115, "valueJpy": 4865300, "assetCat": "株式", "subClass": "国内", "tags": ["ETF"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:1628.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "TYO", "ticker": 1628.0, "name": "TYO:1628", "qty": 35000.0, "avgJpyTotal": 3045000, "priceUsdUnit": 274, "priceJpyUnit": 274, "valueJpy": 9590000, "assetCat": "株式", "subClass": "国内", "tags": ["ETF"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:1628.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "TYO", "ticker": 2288.0, "name": "TYO:2288", "qty": 300.0, "avgJpyTotal": 507534, "priceUsdUnit": 2254, "priceJpyUnit": 2254, "valueJpy": 676200, "assetCat": "株式", "subClass": "国内", "tags": ["個別銘柄"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:2288.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI父", "exchange": "TYO", "ticker": 1655.0, "name": "TYO:1655", "qty": 3000.0, "avgJpyTotal": 1980000, "priceUsdUnit": 843.3, "priceJpyUnit": 843.3, "valueJpy": 2529900, "assetCat": "株式", "subClass": "米国", "tags": ["個別銘柄", "コア資産"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:1655.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI父", "exchange": "TYO", "ticker": 2222.0, "name": "TYO:2222", "qty": 100.0, "avgJpyTotal": 219000, "priceUsdUnit": 1983.5, "priceJpyUnit": 1983.5, "valueJpy": 198350, "assetCat": "株式", "subClass": "国内", "tags": ["個別銘柄"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:2222.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI父", "exchange": "TYO", "ticker": 3139.0, "name": "TYO:3139", "qty": 100.0, "avgJpyTotal": 298000, "priceUsdUnit": 3210, "priceJpyUnit": 3210, "valueJpy": 321000, "assetCat": "株式", "subClass": "国内", "tags": ["個別銘柄"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:3139.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI母", "exchange": "TYO", "ticker": 4967.0, "name": "TYO:4967", "qty": 200.0, "avgJpyTotal": 1177000, "priceUsdUnit": 5515, "priceJpyUnit": 5515, "valueJpy": 1103000, "assetCat": "株式", "subClass": "国内", "tags": ["個別銘柄"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:4967.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI母", "exchange": "TYO", "ticker": 7202.0, "name": "TYO:7202", "qty": 200.0, "avgJpyTotal": 405800, "priceUsdUnit": 2163, "priceJpyUnit": 2163, "valueJpy": 432600, "assetCat": "株式", "subClass": "国内", "tags": ["個別銘柄"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:7202.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI母", "exchange": "TYO", "ticker": 9003.0, "name": "TYO:9003", "qty": 200.0, "avgJpyTotal": 487600, "priceUsdUnit": 2422, "priceJpyUnit": 2422, "valueJpy": 484400, "assetCat": "株式", "subClass": "国内", "tags": ["個別銘柄"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:9003.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI父", "exchange": "TYO", "ticker": 3281.0, "name": "TYO:3281", "qty": 14.0, "avgJpyTotal": 34132, "priceUsdUnit": 133700, "priceJpyUnit": 133700, "valueJpy": 1871800, "assetCat": "株式", "subClass": "国内", "tags": ["個別銘柄"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:3281.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*父", "exchange": "TYO", "ticker": 2621.0, "name": "TYO:2621", "qty": 4500.0, "avgJpyTotal": 5130000, "priceUsdUnit": 1050, "priceJpyUnit": 1050, "valueJpy": 4725000, "assetCat": "債権", "subClass": "米国債", "tags": ["個別銘柄", "ディフェンシブ"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:2621.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "楽天*母", "exchange": "TYO", "ticker": 2621.0, "name": "TYO:2621", "qty": 4000.0, "avgJpyTotal": 4560000, "priceUsdUnit": 1050, "priceJpyUnit": 1050, "valueJpy": 4200000, "assetCat": "債権", "subClass": "米国債", "tags": ["個別銘柄", "ディフェンシブ"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:2621.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI母", "exchange": "TYO", "ticker": 2621.0, "name": "TYO:2621", "qty": 2061.0, "avgJpyTotal": 2349540, "priceUsdUnit": 1050, "priceJpyUnit": 1050, "valueJpy": 2164050, "assetCat": "債権", "subClass": "米国債", "tags": ["個別銘柄", "ディフェンシブ"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "TYO:2621.0", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI父", "exchange": "", "ticker": "eMAXIS 国内TPX", "name": "eMAXIS 国内TPX", "qty": 1.0, "avgJpyTotal": 1000097.663, "priceUsdUnit": 31175, "priceJpyUnit": 31175, "valueJpy": 3061774.0, "assetCat": "株式", "subClass": "国内", "tags": ["投信", "コア資産", "積立中"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "eMAXIS 国内TPX", "qtyMode": "nav10000", "unitsImplied": 982124.7795, "lastUpdated": null}, {"account": "SBI父", "exchange": "", "ticker": "eMAXIS 先進国", "name": "eMAXIS 先進国", "qty": 1.0, "avgJpyTotal": 7248889.742, "priceUsdUnit": 43436, "priceJpyUnit": 43436, "valueJpy": 17269788.0, "assetCat": "株式", "subClass": "先進国", "tags": ["投信", "コア資産", "積立中"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "eMAXIS 先進国", "qtyMode": "nav10000", "unitsImplied": 3975915.83, "lastUpdated": null}, {"account": "SBI父", "exchange": "", "ticker": "eMAXIS 米国", "name": "eMAXIS 米国", "qty": 0.0, "avgJpyTotal": 0, "priceUsdUnit": null, "priceJpyUnit": null, "valueJpy": 0, "assetCat": "株式", "subClass": "米国", "tags": ["投信", "コア資産", "積立中"], "memo": "", "currency": "円建", "autoFetchable": false, "searchLabel": null, "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI父", "exchange": "", "ticker": "eMAXIS 米国", "name": "eMAXIS 米国", "qty": 1.0, "avgJpyTotal": 638725.6509, "priceUsdUnit": 42853, "priceJpyUnit": 42853, "valueJpy": 821320.0, "assetCat": "株式", "subClass": "米国", "tags": ["投信", "コア資産", "積立中"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "eMAXIS 米国", "qtyMode": "nav10000", "unitsImplied": 191659.8605, "lastUpdated": null}, {"account": "SBI父", "exchange": "", "ticker": "eMAXIS 先進国", "name": "eMAXIS 先進国", "qty": 0.0, "avgJpyTotal": 0, "priceUsdUnit": null, "priceJpyUnit": null, "valueJpy": 0, "assetCat": "株式", "subClass": "先進国", "tags": ["投信", "コア資産", "積立中"], "memo": "", "currency": "円建", "autoFetchable": false, "searchLabel": null, "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI母", "exchange": "", "ticker": "SP500", "name": "SP500", "qty": 1.0, "avgJpyTotal": 466672.038, "priceUsdUnit": 3.9775, "priceJpyUnit": 3.9775, "valueJpy": 665157.325, "assetCat": "株式", "subClass": "米国", "tags": ["投信", "コア資産", "積立中"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "SP500", "qtyMode": "nav10000", "unitsImplied": 1672300000, "lastUpdated": null}, {"account": "SBI母", "exchange": "", "ticker": "SP500", "name": "SP500", "qty": 1.0, "avgJpyTotal": 1533349.671, "priceUsdUnit": 3.9775, "priceJpyUnit": 3.9775, "valueJpy": 4044898.738, "assetCat": "株式", "subClass": "米国", "tags": ["投信", "コア資産", "積立中"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "SP500", "qtyMode": "nav10000", "unitsImplied": 10169450000.0, "lastUpdated": null}, {"account": "SBI母", "exchange": "", "ticker": "eMAXIS 米国", "name": "eMAXIS 米国", "qty": 1.0, "avgJpyTotal": 40000.8731, "priceUsdUnit": 4.3497, "priceJpyUnit": 4.3497, "valueJpy": 58255.5321, "assetCat": "株式", "subClass": "米国", "tags": ["投信", "コア資産", "積立中"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "eMAXIS 米国", "qtyMode": "nav10000", "unitsImplied": 133930000.0, "lastUpdated": null}, {"account": "SBI母", "exchange": "", "ticker": "eMAXIS オルカン", "name": "eMAXIS オルカン", "qty": 1.0, "avgJpyTotal": 500004.494, "priceUsdUnit": 3.7227, "priceJpyUnit": 3.7227, "valueJpy": 538901.7747, "assetCat": "株式", "subClass": "米国", "tags": ["投信", "コア資産", "積立中"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "eMAXIS オルカン", "qtyMode": "nav10000", "unitsImplied": 1447610000.0, "lastUpdated": null}, {"account": "SBI父", "exchange": "", "ticker": "eMAXIS オルカン", "name": "eMAXIS オルカン", "qty": 1.0, "avgJpyTotal": 500004.494, "priceUsdUnit": 3.7227, "priceJpyUnit": 3.7227, "valueJpy": 538901.7747, "assetCat": "株式", "subClass": "米国", "tags": ["投信", "コア資産", "積立中"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "eMAXIS オルカン", "qtyMode": "nav10000", "unitsImplied": 1447610000.0, "lastUpdated": null}, {"account": "SBI子供1", "exchange": "NYSEARCA", "ticker": "SPY", "name": "State Street SPDR S&P 500 ETF Trust", "qty": 17.0, "avgJpyTotal": 60813.25, "priceUsdUnit": 765.96, "priceJpyUnit": 117374.94444, "valueJpy": 1995374.055, "assetCat": "株式", "subClass": "米国", "tags": ["ETF", "コア資産"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:SPY", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI子供1", "exchange": "NASDAQ", "ticker": "TLT", "name": "iShares 20+ Year Treasury Bond ETF", "qty": 30.0, "avgJpyTotal": 409410, "priceUsdUnit": 82.2, "priceJpyUnit": 12596.2458, "valueJpy": 377887.374, "assetCat": "債権", "subClass": "米国債", "tags": ["ETF", "ディフェンシブ"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NASDAQ:TLT", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI子供2", "exchange": "NYSEARCA", "ticker": "SPY", "name": "State Street SPDR S&P 500 ETF Trust", "qty": 17.0, "avgJpyTotal": 60813.25, "priceUsdUnit": 765.96, "priceJpyUnit": 117374.94444, "valueJpy": 1995374.055, "assetCat": "株式", "subClass": "米国", "tags": ["ETF", "コア資産"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:SPY", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI子供2", "exchange": "NASDAQ", "ticker": "TLT", "name": "iShares 20+ Year Treasury Bond ETF", "qty": 30.0, "avgJpyTotal": 409410, "priceUsdUnit": 82.2, "priceJpyUnit": 12596.2458, "valueJpy": 377887.374, "assetCat": "債権", "subClass": "米国債", "tags": ["ETF", "ディフェンシブ"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NASDAQ:TLT", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI子供3", "exchange": "NYSEARCA", "ticker": "SPY", "name": "State Street SPDR S&P 500 ETF Trust", "qty": 17.0, "avgJpyTotal": 60813.25, "priceUsdUnit": 765.96, "priceJpyUnit": 117374.94444, "valueJpy": 1995374.055, "assetCat": "株式", "subClass": "米国", "tags": ["ETF", "コア資産"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NYSEARCA:SPY", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "SBI子供3", "exchange": "NASDAQ", "ticker": "TLT", "name": "iShares 20+ Year Treasury Bond ETF", "qty": 30.0, "avgJpyTotal": 409410, "priceUsdUnit": 82.2, "priceJpyUnit": 12596.2458, "valueJpy": 377887.374, "assetCat": "債権", "subClass": "米国債", "tags": ["ETF", "ディフェンシブ"], "memo": "", "currency": "ドル建", "autoFetchable": true, "searchLabel": "NASDAQ:TLT", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "ｺｲﾝﾁｪｯｸ", "exchange": "", "ticker": "BTC", "name": "BTC", "qty": 0.6158491, "avgJpyTotal": 2000000, "priceUsdUnit": 12175243.1, "priceJpyUnit": 12175243.1, "valueJpy": 7498112.505, "assetCat": "仮想通貨", "subClass": null, "tags": ["仮想通貨", "サテライト資産"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "BTC", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "ｺｲﾝﾁｪｯｸ", "exchange": "", "ticker": "ETH", "name": "ETH", "qty": 5.2632, "avgJpyTotal": 1000000, "priceUsdUnit": 385589.9488, "priceJpyUnit": 385589.9488, "valueJpy": 2029437.019, "assetCat": "仮想通貨", "subClass": null, "tags": ["仮想通貨", "サテライト資産"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "ETH", "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}, {"account": "iDeco", "exchange": "", "ticker": "", "name": "iDeco", "qty": 1.0, "avgJpyTotal": 0, "priceUsdUnit": 1600000, "priceJpyUnit": 1600000, "valueJpy": 1600000, "assetCat": "株式", "subClass": "先進国", "tags": ["投信", "積立中", "コア資産"], "memo": "", "currency": "円建", "autoFetchable": true, "searchLabel": "iDeco", "qtyMode": "nav10000", "unitsImplied": 10000.0, "lastUpdated": null}, {"account": "楽天*父", "exchange": "", "ticker": "ちゃいかぶ", "name": "ちゃいかぶ", "qty": 1.0, "avgJpyTotal": 1000000, "priceUsdUnit": 2540000.0, "priceJpyUnit": 389227060.0, "valueJpy": 2540000, "assetCat": "株式", "subClass": "新興国", "tags": ["ETF", "サテライト資産"], "memo": "", "currency": "ドル建", "autoFetchable": false, "searchLabel": null, "qtyMode": "shares", "unitsImplied": null, "lastUpdated": null}]}, "cash": [{"bank": "住信SBI", "amount": 4000000}, {"bank": "", "amount": 100000}, {"bank": "住信SBI", "amount": 1313714}, {"bank": "楽天銀行", "amount": 6730000}, {"bank": "ゆうちょ", "amount": 2260000}, {"bank": "みずほローン口座", "amount": 5568000}, {"bank": "買い付け余力", "amount": 2006062}, {"bank": "買い付け余力", "amount": 1476000}, {"bank": "買い付け余力", "amount": 600000}, {"bank": "買い付け余力", "amount": 600000}, {"bank": "買い付け余力", "amount": 600000}], "init": {"securities0": 3800.0, "cash0": 1700.0}};
 
 /* ============================================================
    デザイントークン — 「帳簿（家計簿）」モチーフ
@@ -76,6 +76,133 @@ function fmt(n, digits = 0) {
 }
 const fmtMan = (n) => fmt(n) + " 万円";
 const fmtYen = (n) => "¥" + fmt(n);
+
+/* 長押し→ドラッグで、リストの行を好きな位置に並べ替えるための共通フック。
+   「キー」は各行を一意に識別する値（多くの場合、元の配列上の絶対インデックス）とし、
+   同じ並べ替えグループに属する行の現在の表示順（キーの配列）を order として渡す。
+   onReorder(order, fromPos, toPos) が確定時に呼ばれる。 */
+function useDragReorder(onReorder) {
+  const itemRefs = useRef(new Map());
+  const [dragKey, setDragKey] = useState(null);
+  const [overKey, setOverKey] = useState(null);
+  const drag = useRef({ active: false, key: null, order: [], startX: 0, startY: 0, timer: null, overKey: null, frozenRects: null });
+  const onReorderRef = useRef(onReorder);
+  onReorderRef.current = onReorder;
+
+  const setItemRef = (key) => (el) => {
+    if (el) itemRefs.current.set(key, el);
+    else itemRefs.current.delete(key);
+  };
+
+  // ドラッグ中に見た目の並びがその場で入れ替わっても判定がぶれないよう、
+  // ドラッグ開始時点の各行の位置を凍結して使う（毎回DOMから取り直すと、
+  // プレビューで動いた行につられて判定が振動してしまうため）
+  const keyAtY = (order, frozenRects, clientY) => {
+    for (const k of order) {
+      const rect = frozenRects.get(k);
+      if (!rect) continue;
+      if (clientY < rect.top + rect.height / 2) return k;
+    }
+    return order[order.length - 1];
+  };
+
+  const handlersRef = useRef(null);
+  if (!handlersRef.current) {
+    const onMove = (e) => {
+      const d = drag.current;
+      if (!d.active) {
+        if (Math.abs(e.clientX - d.startX) > 8 || Math.abs(e.clientY - d.startY) > 8) {
+          if (d.timer) { clearTimeout(d.timer); d.timer = null; }
+        }
+        return;
+      }
+      e.preventDefault();
+      const k = keyAtY(d.order, d.frozenRects, e.clientY);
+      d.overKey = k;
+      setOverKey(k);
+    };
+    const endDrag = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      const d = drag.current;
+      if (d.timer) clearTimeout(d.timer);
+      if (d.active) {
+        const from = d.order.indexOf(d.key);
+        const to = d.order.indexOf(d.overKey);
+        if (from !== -1 && to !== -1 && from !== to) onReorderRef.current(d.order, from, to);
+      }
+      drag.current = { active: false, key: null, order: [], startX: 0, startY: 0, timer: null, overKey: null, frozenRects: null };
+      setDragKey(null);
+      setOverKey(null);
+    };
+    const onUp = () => endDrag();
+    handlersRef.current = { onMove, onUp };
+  }
+
+  const bindHandle = (key, order) => ({
+    onPointerDown: (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const { onMove, onUp } = handlersRef.current;
+      drag.current.key = key;
+      drag.current.order = order;
+      drag.current.startX = e.clientX;
+      drag.current.startY = e.clientY;
+      drag.current.overKey = key;
+      drag.current.timer = setTimeout(() => {
+        const frozenRects = new Map();
+        order.forEach((k) => {
+          const el = itemRefs.current.get(k);
+          if (el) frozenRects.set(k, el.getBoundingClientRect());
+        });
+        drag.current.frozenRects = frozenRects;
+        drag.current.active = true;
+        setDragKey(key);
+        setOverKey(key);
+        if (navigator.vibrate) navigator.vibrate(12);
+      }, 420);
+      window.addEventListener("pointermove", onMove, { passive: false });
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+    },
+  });
+
+  // ドラッグ中はプレビュー用に、現在の並びをその場で組み替えて返す
+  const getRenderOrder = (order) => {
+    if (dragKey == null || !order.includes(dragKey)) return order;
+    const from = order.indexOf(dragKey);
+    const to = overKey != null && order.includes(overKey) ? order.indexOf(overKey) : from;
+    if (from === to) return order;
+    const seq = [...order];
+    const [moved] = seq.splice(from, 1);
+    seq.splice(to, 0, moved);
+    return seq;
+  };
+
+  return { bindHandle, setItemRef, dragKey, getRenderOrder };
+}
+
+// order（現在その並びを占めている絶対インデックスの列）に沿って、
+// fromPos番目とtoPos番目を入れ替えた新しい配列を返す（他の要素の絶対位置は変えない）
+function reorderArrayBySlots(fullArray, order, fromPos, toPos) {
+  const seq = [...order];
+  const [moved] = seq.splice(fromPos, 1);
+  seq.splice(toPos, 0, moved);
+  const values = seq.map((absIdx) => fullArray[absIdx]);
+  const next = [...fullArray];
+  order.forEach((slot, i) => { next[slot] = values[i]; });
+  return next;
+}
+
+function DragHandle({ dragProps, active }) {
+  return (
+    <span {...dragProps} style={{
+      flexShrink: 0, cursor: "grab", touchAction: "none", color: INK_SOFT, fontSize: 14,
+      padding: "0 4px", userSelect: "none", opacity: active ? 1 : 0.6,
+    }} title="長押しでドラッグして並べ替え">≡</span>
+  );
+}
 
 // 食費を家族一人ずつ（父・母・子1〜3）ではなく世帯でまとめて1行にする移行処理。
 // 既にlivingにfoodがある場合は何もしない。
@@ -717,10 +844,16 @@ function YearRow({ label, arr, onChange, indent, wizard }) {
   );
 }
 
+const UNIT_LABEL_COLOR = "#FFD84D";
+
 function YearHeader() {
   return (
     <div style={{ display: "flex", position: "sticky", top: 0, zIndex: 3, background: INK }}>
-      <div style={{ width: 108, flexShrink: 0, position: "sticky", left: 0, background: INK, zIndex: 4 }} />
+      <div style={{
+        width: 108, flexShrink: 0, position: "sticky", left: 0, background: INK, zIndex: 4,
+        display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center",
+        color: UNIT_LABEL_COLOR, fontSize: 10, fontWeight: 700, padding: "2px 2px", lineHeight: 1.2,
+      }}>単位：万円</div>
       {YEARS.map((y) => (
         <div key={y} style={{ width: 82, flexShrink: 0, textAlign: "center", color: PAPER, fontSize: 11.5, padding: "5px 0", borderRight: "1px solid #3A4C6B" }}>
           '{String(y).slice(2)}
@@ -1445,7 +1578,11 @@ function SheetRow({ label, arr, onChange, bold, highlight, indent, wizard }) {
 function SheetYearHeader() {
   return (
     <div style={{ display: "flex", position: "sticky", top: 0, zIndex: 3, background: INK }}>
-      <div style={{ width: 128, flexShrink: 0, position: "sticky", left: 0, background: INK, zIndex: 4, borderRight: "1px solid #3A4C6B" }} />
+      <div style={{
+        width: 128, flexShrink: 0, position: "sticky", left: 0, background: INK, zIndex: 4, borderRight: "1px solid #3A4C6B",
+        display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center",
+        color: UNIT_LABEL_COLOR, fontSize: 10.5, fontWeight: 700, padding: "2px 2px", lineHeight: 1.2,
+      }}>単位：万円</div>
       {YEARS.map((y) => (
         <div key={y} style={{ width: 82, flexShrink: 0, textAlign: "center", color: PAPER, fontSize: 11, padding: "5px 0", borderRight: "1px solid #3A4C6B" }}>
           {y}
@@ -2811,18 +2948,23 @@ function TradeForm({ kind, idx, h, fxRate, cashList, cashLink, onRequestCashPick
   );
 }
 
-function HoldingCard({ h, idx, onUpdate, onDelete, fxRate, fmtCur = fmtYen, cashList, cashLink, onRequestCashPick, onApplyWithCash, onCardRef }) {
+function HoldingCard({ h, idx, onUpdate, onDelete, fxRate, fmtCur = fmtYen, cashList, cashLink, onRequestCashPick, onApplyWithCash, onCardRef, dragHandleProps, isDragging, setDragRef }) {
   const [expanded, setExpanded] = useState(false);
   const [tradeOpen, setTradeOpen] = useState(null); // null | "buy" | "sell"
   const pl = (h.valueJpy || 0) - (h.avgJpyTotal || 0);
   const displayQty = h.qtyMode === "nav10000" ? h.unitsImplied : h.qty;
 
   return (
-    <div ref={(el) => onCardRef?.(idx, el)} style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 4, overflow: "hidden", background: "#fff" }}>
-      <button onClick={() => setExpanded((e) => !e)} style={{
-        width: "100%", textAlign: "left", padding: "8px 10px", border: "none", background: "transparent", cursor: "pointer",
-        display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8,
-      }}>
+    <div ref={(el) => { onCardRef?.(idx, el); setDragRef?.(el); }} style={{
+      border: `1px solid ${PAPER_LINE}`, borderRadius: 4, overflow: "hidden", background: "#fff",
+      boxShadow: isDragging ? "0 2px 8px rgba(0,0,0,0.18)" : "none",
+    }}>
+      <div style={{ display: "flex", alignItems: "stretch" }}>
+        {dragHandleProps && <DragHandle dragProps={dragHandleProps} active={isDragging} />}
+        <button onClick={() => setExpanded((e) => !e)} style={{
+          flex: 1, minWidth: 0, textAlign: "left", padding: "8px 10px", border: "none", background: "transparent", cursor: "pointer",
+          display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8,
+        }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 12.5, fontWeight: 600, color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {h.ticker ? `${h.ticker} ` : ""}{h.name}
@@ -2841,7 +2983,8 @@ function HoldingCard({ h, idx, onUpdate, onDelete, fxRate, fmtCur = fmtYen, cash
           </div>
           <span style={{ color: INK_SOFT, fontSize: 11, marginTop: 2 }}>{expanded ? "▲" : "▼"}</span>
         </div>
-      </button>
+        </button>
+      </div>
       {expanded && (
         <div style={{ padding: 10, borderTop: `1px solid ${PAPER_LINE}`, background: CARD }}>
           {h.memo && (
@@ -3091,6 +3234,8 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
     setCashList((prev) => { const next = [...prev]; next[idx] = { ...next[idx], [field]: value }; return next; });
   };
   const addCash = () => setCashList((prev) => [...prev, { bank: "", amount: 0 }]);
+  const cashDrag = useDragReorder((order, from, to) => setCashList((prev) => reorderArrayBySlots(prev, order, from, to)));
+  const holdingDrag = useDragReorder((order, from, to) => setHoldings((prev) => reorderArrayBySlots(prev, order, from, to)));
   const deleteCash = (idx) => setCashList((prev) => prev.filter((_, i) => i !== idx));
   const deleteHolding = (idx) => {
     if (!window.confirm("この銘柄を削除しますか？")) return;
@@ -3204,30 +3349,36 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
             </div>
           )}
           <Accordion title={`現金 — ${fmtCur(totalCash)}`} colorKey="living" open={cashOpen} onToggle={setCashOpen}>
-            {cashList.map((c, i) => {
-              const picking = cashLink && cashLink.cashIdx === null;
-              const isSelected = cashLink && cashLink.cashIdx === i;
-              return (
-                <div key={i} onClick={picking ? () => pickCashRow(i) : undefined} style={{
-                  display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 4px", borderBottom: `1px solid ${PAPER_LINE}`, gap: 6,
-                  cursor: picking ? "pointer" : "default",
-                  background: isSelected ? GOLD_SOFT : picking ? "#FFFDF9" : "transparent",
-                  borderRadius: picking ? 4 : 0,
-                }}>
-                  <span style={{ fontSize: 10.5, color: INK_SOFT, flexShrink: 0, minWidth: 30 }}>No.{i + 1}</span>
-                  <input value={c.bank} onChange={(e) => updateCashField(i, "bank", e.target.value)} placeholder="口座名・メモ" disabled={picking}
-                    style={{ flex: 1, fontSize: 13, color: INK, border: "none", borderBottom: `1px dashed ${PAPER_LINE}`, background: "transparent", padding: "2px 2px" }} />
-                  <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
-                    <span style={{ fontSize: 12, color: INK_SOFT }}>¥</span>
-                    <input type="number" value={c.amount} onChange={(e) => updateCash(i, parseFloat(e.target.value) || 0)} disabled={picking}
-                      style={{ width: 100, textAlign: "right", fontSize: 13, padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
+            {(() => {
+              const order = cashDrag.getRenderOrder(cashList.map((_, i) => i));
+              return order.map((i, pos) => {
+                const c = cashList[i];
+                const picking = cashLink && cashLink.cashIdx === null;
+                const isSelected = cashLink && cashLink.cashIdx === i;
+                return (
+                  <div key={i} ref={cashDrag.setItemRef(i)} onClick={picking ? () => pickCashRow(i) : undefined} style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 4px", borderBottom: `1px solid ${PAPER_LINE}`, gap: 6,
+                    cursor: picking ? "pointer" : "default",
+                    background: isSelected ? GOLD_SOFT : cashDrag.dragKey === i ? GOLD_SOFT : picking ? "#FFFDF9" : "transparent",
+                    borderRadius: picking ? 4 : 0,
+                    boxShadow: cashDrag.dragKey === i ? "0 2px 8px rgba(0,0,0,0.18)" : "none",
+                  }}>
+                    <DragHandle dragProps={cashDrag.bindHandle(i, cashList.map((_, k) => k))} active={cashDrag.dragKey === i} />
+                    <span style={{ fontSize: 10.5, color: INK_SOFT, flexShrink: 0, minWidth: 26 }}>No.{pos + 1}</span>
+                    <input value={c.bank} onChange={(e) => updateCashField(i, "bank", e.target.value)} placeholder="口座名・メモ" disabled={picking}
+                      style={{ flex: 1, fontSize: 13, color: INK, border: "none", borderBottom: `1px dashed ${PAPER_LINE}`, background: "transparent", padding: "2px 2px" }} />
+                    <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                      <span style={{ fontSize: 12, color: INK_SOFT }}>¥</span>
+                      <input type="number" value={c.amount} onChange={(e) => updateCash(i, parseFloat(e.target.value) || 0)} disabled={picking}
+                        style={{ width: 100, textAlign: "right", fontSize: 13, padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
+                    </div>
+                    {!picking && (
+                      <button onClick={() => deleteCash(i)} title="削除" style={{ border: "none", background: "transparent", color: SEAL, fontSize: 14, cursor: "pointer", padding: "0 2px" }}>×</button>
+                    )}
                   </div>
-                  {!picking && (
-                    <button onClick={() => deleteCash(i)} title="削除" style={{ border: "none", background: "transparent", color: SEAL, fontSize: 14, cursor: "pointer", padding: "0 2px" }}>×</button>
-                  )}
-                </div>
-              );
-            })}
+                );
+              });
+            })()}
             <button onClick={addCash} style={{
               marginTop: 8, fontSize: 11.5, padding: "5px 10px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`,
               background: "#FFFDF9", color: INK_SOFT, cursor: "pointer",
@@ -3237,16 +3388,20 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
 
         {Object.entries(groups).map(([cat, idxs]) => {
           const subtotal = idxs.reduce((s, i) => s + (holdings[i].valueJpy || 0), 0);
+          const renderIdxs = holdingDrag.getRenderOrder(idxs);
           return (
             <Accordion key={cat} title={`${cat} — ${fmtCur(subtotal)}`} colorKey={assetCatColorKey(cat)}>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {idxs.map((i) => (
+                {renderIdxs.map((i) => (
                   <HoldingCard key={i} idx={i} h={holdings[i]} fxRate={params.fxRate} fmtCur={fmtCur}
                     cashList={cashList} cashLink={cashLink}
                     onRequestCashPick={requestCashPick} onApplyWithCash={applyTradeWithCash}
                     onCardRef={(idx, el) => { holdingRefs.current[idx] = el; }}
                     onUpdate={(patch) => updateHoldingPatch(i, patch)}
-                    onDelete={() => deleteHolding(i)} />
+                    onDelete={() => deleteHolding(i)}
+                    dragHandleProps={holdingDrag.bindHandle(i, idxs)}
+                    isDragging={holdingDrag.dragKey === i}
+                    setDragRef={holdingDrag.setItemRef(i)} />
                 ))}
               </div>
             </Accordion>
@@ -3380,9 +3535,10 @@ function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, 
     mode = "snapshot";
   } else {
     // 実データのない年：現在の資産配分比率を、その年のシミュレーション結果に適用した試算値
-    const secVal = model.securities[yearIdx];
-    const cashVal = model.cash[yearIdx];
-    const reVal = model.realEstateAsset[yearIdx];
+    // （シミュレーションの数値は万円単位のため、円単位のポートフォリオ・現金と合わせるために×10,000する）
+    const secVal = model.securities[yearIdx] * 10000;
+    const cashVal = model.cash[yearIdx] * 10000;
+    const reVal = model.realEstateAsset[yearIdx] * 10000;
     const map = {};
     Object.entries(subWeights).forEach(([k, w]) => { if (w > 0) map[k] = w * secVal; });
     if (cashVal > 0) map["現金 / 現金"] = cashVal;
@@ -3695,11 +3851,15 @@ function LedgerInputTab({ ledger, setLedger, params }) {
   const [showCategoryEditor, setShowCategoryEditor] = useState(false);
 
   // 新しく追加した行ほど上に表示する（元配列内の位置が新しいものほど先）
-  const yearEntries = ledger.entries
-    .map((e, idx) => ({ e, idx }))
-    .filter((x) => x.e.year === year)
-    .sort((a, b) => b.idx - a.idx)
-    .map((x) => x.e);
+  const yearOrder = ledger.entries
+    .map((e, idx) => idx)
+    .filter((idx) => ledger.entries[idx].year === year)
+    .sort((a, b) => b - a);
+
+  const entryDrag = useDragReorder((order, from, to) => setLedger((prev) => ({
+    ...prev, entries: reorderArrayBySlots(prev.entries, order, from, to),
+  })));
+  const renderOrder = entryDrag.getRenderOrder(yearOrder);
 
   const addRow = () => {
     setLedger((prev) => ({
@@ -3712,22 +3872,6 @@ function LedgerInputTab({ ledger, setLedger, params }) {
   };
   const updateRow = (id, patch) => setLedger((prev) => ({ ...prev, entries: prev.entries.map((e) => e.id === id ? { ...e, ...patch } : e) }));
   const deleteRow = (id) => setLedger((prev) => ({ ...prev, entries: prev.entries.filter((e) => e.id !== id) }));
-  const moveRow = (id, dir) => {
-    setLedger((prev) => {
-      const entries = [...prev.entries];
-      const order = entries
-        .map((e, idx) => idx)
-        .filter((idx) => entries[idx].year === year)
-        .sort((a, b) => b - a);
-      const curPos = order.findIndex((idx) => entries[idx].id === id);
-      if (curPos === -1) return prev;
-      const swapPos = dir === "up" ? curPos - 1 : curPos + 1;
-      if (swapPos < 0 || swapPos >= order.length) return prev;
-      const i1 = order[curPos], i2 = order[swapPos];
-      [entries[i1], entries[i2]] = [entries[i2], entries[i1]];
-      return { ...prev, entries };
-    });
-  };
 
   return (
     <div style={{ paddingBottom: 40 }}>
@@ -3754,20 +3898,26 @@ function LedgerInputTab({ ledger, setLedger, params }) {
           background: "#FFFDF9", color: INK_SOFT, cursor: "pointer",
         }}>＋ 行を追加（一番上に新しい行を入力）</button>
         <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 5, background: CARD }}>
-          {yearEntries.length === 0 && (
+          {renderOrder.length === 0 && (
             <div style={{ padding: "14px 10px", fontSize: 12, color: INK_SOFT, textAlign: "center" }}>{year}年の入力はまだありません</div>
           )}
-          {yearEntries.map((e, i) => (
-            <div key={e.id} style={{ padding: "8px 8px", borderBottom: `1px solid ${PAPER_LINE}` }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+          {renderOrder.map((idx) => {
+            const e = ledger.entries[idx];
+            return (
+              <div key={e.id} ref={entryDrag.setItemRef(idx)} style={{
+                display: "flex", alignItems: "center", gap: 5, padding: "6px 6px", borderBottom: `1px solid ${PAPER_LINE}`,
+                background: entryDrag.dragKey === idx ? GOLD_SOFT : "transparent",
+                boxShadow: entryDrag.dragKey === idx ? "0 2px 8px rgba(0,0,0,0.18)" : "none",
+              }}>
+                <DragHandle dragProps={entryDrag.bindHandle(idx, yearOrder)} active={entryDrag.dragKey === idx} />
                 <select value={e.month} onChange={(ev) => updateRow(e.id, { month: ev.target.value === "" ? "" : parseInt(ev.target.value, 10) })}
-                  style={{ flexShrink: 0, width: 58, padding: "4px 2px", fontSize: 12, border: `1px solid ${PAPER_LINE}`, borderRadius: 3, background: "#fff", color: INK }}>
+                  style={{ flexShrink: 0, width: 50, padding: "4px 1px", fontSize: 11.5, border: `1px solid ${PAPER_LINE}`, borderRadius: 3, background: "#fff", color: INK }}>
                   {!e.month && <option value="">月</option>}
                   {MONTHS.map((m) => <option key={m} value={m}>{m}月</option>)}
                 </select>
                 <select value={e.categoryId} onChange={(ev) => updateRow(e.id, { categoryId: ev.target.value })}
-                  style={{ flex: "1 1 auto", minWidth: 0, padding: "4px 4px", fontSize: 12, border: `1px solid ${PAPER_LINE}`, borderRadius: 3, background: "#fff", color: INK }}>
-                  {!e.categoryId && <option value="">費目を選択</option>}
+                  style={{ flex: "1 1 70px", minWidth: 0, padding: "4px 2px", fontSize: 11.5, border: `1px solid ${PAPER_LINE}`, borderRadius: 3, background: "#fff", color: INK }}>
+                  {!e.categoryId && <option value="">費目</option>}
                   <optgroup label="支出">
                     {ledger.categories.filter((c) => c.type === "expense").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </optgroup>
@@ -3775,27 +3925,14 @@ function LedgerInputTab({ ledger, setLedger, params }) {
                     {ledger.categories.filter((c) => c.type === "income").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </optgroup>
                 </select>
-                <div style={{ display: "flex", flexShrink: 0 }}>
-                  <button onClick={() => moveRow(e.id, "up")} disabled={i === 0} title="上へ移動" style={{
-                    border: "none", background: "transparent", color: i === 0 ? PAPER_LINE : INK_SOFT, fontSize: 11, cursor: i === 0 ? "default" : "pointer", lineHeight: 1, padding: "0 3px",
-                  }}>▲</button>
-                  <button onClick={() => moveRow(e.id, "down")} disabled={i === yearEntries.length - 1} title="下へ移動" style={{
-                    border: "none", background: "transparent", color: i === yearEntries.length - 1 ? PAPER_LINE : INK_SOFT, fontSize: 11, cursor: i === yearEntries.length - 1 ? "default" : "pointer", lineHeight: 1, padding: "0 3px",
-                  }}>▼</button>
-                </div>
+                <input type="number" value={e.amount} onChange={(ev) => updateRow(e.id, { amount: ev.target.value === "" ? 0 : parseFloat(ev.target.value) })}
+                  style={{ flexShrink: 0, width: 72, textAlign: "right", fontSize: 11.5, padding: "4px 4px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
+                <input value={e.memo} onChange={(ev) => updateRow(e.id, { memo: ev.target.value })} placeholder="メモ"
+                  style={{ flex: "1 1 50px", minWidth: 0, fontSize: 11.5, padding: "4px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3 }} />
                 <button onClick={() => deleteRow(e.id)} title="削除" style={{ flexShrink: 0, border: "none", background: "transparent", color: SEAL, fontSize: 15, cursor: "pointer", padding: "0 2px" }}>×</button>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
-                  <span style={{ fontSize: 12, color: INK_SOFT }}>¥</span>
-                  <input type="number" value={e.amount} onChange={(ev) => updateRow(e.id, { amount: ev.target.value === "" ? 0 : parseFloat(ev.target.value) })}
-                    style={{ width: 88, textAlign: "right", fontSize: 12.5, padding: "4px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
-                </div>
-                <input value={e.memo} onChange={(ev) => updateRow(e.id, { memo: ev.target.value })} placeholder="メモ"
-                  style={{ flex: 1, minWidth: 0, fontSize: 12, padding: "4px 6px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3 }} />
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>
