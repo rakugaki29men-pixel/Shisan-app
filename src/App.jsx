@@ -545,6 +545,13 @@ function sumArrAt(obj, keys, i) {
   for (const k of keys) s += (obj[k]?.[i] ?? 0);
   return s;
 }
+// ユーザーが追加したカスタム行（項目ごとに自由に追加できる行）の年別合計
+function sumCustomAt(rows, i) {
+  if (!rows) return 0;
+  let s = 0;
+  for (const r of rows) s += (r.arr?.[i] ?? 0);
+  return s;
+}
 
 /* ============================================================
    住宅ローン試算プラン（費用ウィザードの「住宅」から設定）
@@ -686,11 +693,12 @@ function computeModel(sim, params) {
     realEstateAsset = housingPlan.realEstateAsset;
   }
 
+  const cr = exp.customRows || {};
   for (let i = 0; i < N; i++) {
-    tuition[i] = sumArrAt(exp.tuition, tuitionKeys, i);
-    medical[i] = sumArrAt(exp.medical, medicalKeys, i);
-    carTotal[i] = sumArrAt(exp.car, carKeys, i);
-    livingTotal[i] = sumArrAt(exp.living, livingKeys, i);
+    tuition[i] = sumArrAt(exp.tuition, tuitionKeys, i) + sumCustomAt(cr.tuition, i);
+    medical[i] = sumArrAt(exp.medical, medicalKeys, i) + sumCustomAt(cr.medical, i);
+    carTotal[i] = sumArrAt(exp.car, carKeys, i) + sumCustomAt(cr.car, i);
+    livingTotal[i] = sumArrAt(exp.living, livingKeys, i) + sumCustomAt(cr.living, i);
 
     if (housingPlan) {
       housingCost[i] -= (params.housingSubsidyAnnual || 0);
@@ -736,13 +744,13 @@ function computeModel(sim, params) {
   const dividend = zeros(), securities = zeros(), cash = zeros(), assetTotal = zeros();
 
   for (let i = 0; i < N; i++) {
-    expenseTotal[i] = tuition[i] + (exp.dorm[i] ?? 0) + medical[i] + housingCost[i] + carTotal[i] +
-      livingTotal[i] + (exp.social[i] ?? 0) + (exp.leisure[i] ?? 0) + (exp.other[i] ?? 0) + (exp.sudden[i] ?? 0);
+    expenseTotal[i] = tuition[i] + (exp.dorm[i] ?? 0) + medical[i] + housingCost[i] + sumCustomAt(cr.housing, i) + carTotal[i] +
+      livingTotal[i] + (exp.social[i] ?? 0) + (exp.leisure[i] ?? 0) + (exp.other[i] ?? 0) + (exp.sudden[i] ?? 0) + sumCustomAt(cr.social, i);
 
     dividend[i] = i === 0 ? 0 : securities[i - 1] * params.dividendRate;
 
     incomeTotal[i] = (inc.father[i] ?? 0) + (inc.mother[i] ?? 0) + (inc.taxRefund[i] ?? 0) +
-      dividend[i] + (inc.other_childAllowance[i] ?? 0) + (inc.pension_retirement[i] ?? 0);
+      dividend[i] + (inc.other_childAllowance[i] ?? 0) + (inc.pension_retirement[i] ?? 0) + sumCustomAt(inc.customRows, i);
 
     balance[i] = incomeTotal[i] - expenseTotal[i];
 
@@ -933,14 +941,31 @@ function Accordion({ title, colorKey, defaultOpen, children, rightSlot, onWizard
 }
 
 // 横スクロール・年次編集テーブル（帳簿の見開きページ風）
-function YearRow({ label, arr, onChange, indent, wizard }) {
+const EDIT_TABLE_LABEL_WIDTH = 128;
+
+function YearRow({ label, arr, onChange, indent, wizard, custom, onLabelChange, onDelete, onMoveUp, onMoveDown }) {
   const bg = wizard ? SUMI_SOFT : CARD;
   return (
     <div style={{ display: "flex", alignItems: "center", borderBottom: `1px solid ${PAPER_LINE}` }}>
       <div style={{
-        width: 108, flexShrink: 0, fontSize: 12, color: indent ? INK_SOFT : INK, padding: "6px 8px 6px " + (indent ? "18px" : "8px"),
+        width: EDIT_TABLE_LABEL_WIDTH, flexShrink: 0, display: "flex", alignItems: "center", gap: 2,
+        padding: "4px 6px 4px " + (indent ? "16px" : "6px"),
         position: "sticky", left: 0, background: bg, zIndex: 2, borderRight: `1px solid ${PAPER_LINE}`,
-      }}>{label}{wizard && <span title="費用ウィザードで設定" style={{ marginLeft: 4 }}>🧮</span>}</div>
+      }}>
+        {custom ? (
+          <>
+            <input value={label} onChange={(e) => onLabelChange(e.target.value)} placeholder="項目名"
+              style={{ flex: 1, minWidth: 0, fontSize: 11, border: "none", background: "transparent", borderBottom: `1px dashed ${PAPER_LINE}`, padding: "2px 0", color: INK }} />
+            {onMoveUp && <button onClick={onMoveUp} title="上へ移動" style={{ flexShrink: 0, border: "none", background: "transparent", color: INK_SOFT, fontSize: 10, cursor: "pointer", padding: 0 }}>▲</button>}
+            {onMoveDown && <button onClick={onMoveDown} title="下へ移動" style={{ flexShrink: 0, border: "none", background: "transparent", color: INK_SOFT, fontSize: 10, cursor: "pointer", padding: 0 }}>▼</button>}
+            <button onClick={onDelete} title="削除" style={{ flexShrink: 0, border: "none", background: "transparent", color: SEAL, fontSize: 13, cursor: "pointer", padding: 0 }}>×</button>
+          </>
+        ) : (
+          <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: indent ? INK_SOFT : INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {label}{wizard && <span title="費用ウィザードで設定" style={{ marginLeft: 4 }}>🧮</span>}
+          </div>
+        )}
+      </div>
       <div style={{ display: "flex", background: bg }}>
         {YEARS.map((y, i) => (
           <div key={y} style={{ padding: "5px 3px", borderRight: `1px solid ${PAPER_LINE}` }}>
@@ -958,7 +983,7 @@ function YearHeader() {
   return (
     <div style={{ display: "flex", position: "sticky", top: 0, zIndex: 3, background: INK }}>
       <div style={{
-        width: 108, flexShrink: 0, position: "sticky", left: 0, background: INK, zIndex: 4,
+        width: EDIT_TABLE_LABEL_WIDTH, flexShrink: 0, position: "sticky", left: 0, background: INK, zIndex: 4,
         display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center",
         color: UNIT_LABEL_COLOR, fontSize: 10, fontWeight: 700, padding: "2px 2px", lineHeight: 1.2,
       }}>単位：万円</div>
@@ -971,15 +996,19 @@ function YearHeader() {
   );
 }
 
-function EditTable({ rows }) {
+function EditTable({ rows, addButton }) {
   return (
-    <div style={{ overflowX: "auto", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, maxHeight: 320 }}>
-      <div style={{ minWidth: 108 + N * 82 }}>
-        <YearHeader />
-        {rows.map((r) => (
-          <YearRow key={r.label} label={r.label} arr={r.arr} onChange={r.onChange} indent={r.indent} wizard={r.wizard} />
-        ))}
+    <div>
+      <div style={{ overflowX: "auto", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, maxHeight: 320 }}>
+        <div style={{ minWidth: EDIT_TABLE_LABEL_WIDTH + N * 82 }}>
+          <YearHeader />
+          {rows.map((r) => (
+            <YearRow key={r.id || r.label} label={r.label} arr={r.arr} onChange={r.onChange} indent={r.indent} wizard={r.wizard}
+              custom={r.custom} onLabelChange={r.onLabelChange} onDelete={r.onDelete} onMoveUp={r.onMoveUp} onMoveDown={r.onMoveDown} />
+          ))}
+        </div>
       </div>
+      {addButton}
     </div>
   );
 }
@@ -2418,7 +2447,42 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
   const [activeMarker, setActiveMarker] = useState(null);
   const [showScenario, setShowScenario] = useState(false);
 
+  // 支出／収入の内訳編集用の元に戻す・やり直す（最大5件、このタブでの編集のみが対象）
+  const [undoStack, setUndoStack] = useState([]);
+  const [redoStack, setRedoStack] = useState([]);
+  const recordHistory = () => {
+    setUndoStack((stack) => [...stack, clone(sim)].slice(-5));
+    setRedoStack([]);
+  };
+  const undo = () => {
+    if (undoStack.length === 0) return;
+    const prevSim = undoStack[undoStack.length - 1];
+    setRedoStack((r) => [...r, clone(sim)].slice(-5));
+    setUndoStack((stack) => stack.slice(0, -1));
+    setSim(prevSim);
+  };
+  const redo = () => {
+    if (redoStack.length === 0) return;
+    const nextSim = redoStack[redoStack.length - 1];
+    setUndoStack((stack) => [...stack, clone(sim)].slice(-5));
+    setRedoStack((r) => r.slice(0, -1));
+    setSim(nextSim);
+  };
+  const UndoRedoControls = () => (
+    <div style={{ display: "flex", gap: 4 }}>
+      <button onClick={undo} disabled={undoStack.length === 0} title="元に戻す" style={{
+        border: `1px solid ${PAPER_LINE}`, background: "#fff", borderRadius: 4, padding: "5px 8px",
+        fontSize: 13, cursor: undoStack.length === 0 ? "default" : "pointer", opacity: undoStack.length === 0 ? 0.35 : 1,
+      }}>↩️</button>
+      <button onClick={redo} disabled={redoStack.length === 0} title="やり直す" style={{
+        border: `1px solid ${PAPER_LINE}`, background: "#fff", borderRadius: 4, padding: "5px 8px",
+        fontSize: 13, cursor: redoStack.length === 0 ? "default" : "pointer", opacity: redoStack.length === 0 ? 0.35 : 1,
+      }}>↪️</button>
+    </div>
+  );
+
   const mk = (path) => (i, v) => {
+    recordHistory();
     setSim((prev) => {
       const next = clone(prev);
       let obj = next.expense;
@@ -2432,9 +2496,88 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
     });
   };
   const mkInc = (key) => (i, v) => {
+    recordHistory();
     setSim((prev) => { const next = clone(prev); fillForward(next.income[key], i, v); return next; });
   };
   const isWizard = (path) => (sim.wizardTouched || []).includes(path);
+
+  // 各項目（学費・医療・車 等）ごとに自由に追加できるカスタム行
+  const customRowsFor = (kind, sectionKey) => (kind === "income" ? sim.income.customRows : sim.expense.customRows?.[sectionKey]) || [];
+  const addCustomRow = (kind, sectionKey) => {
+    recordHistory();
+    setSim((prev) => {
+      const next = clone(prev);
+      const newRow = { id: `cr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, label: "", arr: zeros() };
+      if (kind === "income") next.income.customRows = [...(next.income.customRows || []), newRow];
+      else {
+        next.expense.customRows = next.expense.customRows || {};
+        next.expense.customRows[sectionKey] = [...(next.expense.customRows[sectionKey] || []), newRow];
+      }
+      return next;
+    });
+  };
+  const renameCustomRow = (kind, sectionKey, id) => (label) => {
+    setSim((prev) => {
+      const next = clone(prev);
+      const list = kind === "income" ? next.income.customRows : next.expense.customRows?.[sectionKey];
+      const row = (list || []).find((r) => r.id === id);
+      if (row) row.label = label;
+      return next;
+    });
+  };
+  const updateCustomRowValue = (kind, sectionKey, id) => (i, v) => {
+    recordHistory();
+    setSim((prev) => {
+      const next = clone(prev);
+      const list = kind === "income" ? next.income.customRows : next.expense.customRows?.[sectionKey];
+      const row = (list || []).find((r) => r.id === id);
+      if (row) fillForward(row.arr, i, v);
+      return next;
+    });
+  };
+  const deleteCustomRow = (kind, sectionKey, id, label) => () => {
+    if (!window.confirm(`「${label || "この行"}」を削除します。入力したデータは元に戻せません。よろしいですか？`)) return;
+    recordHistory();
+    setSim((prev) => {
+      const next = clone(prev);
+      if (kind === "income") next.income.customRows = (next.income.customRows || []).filter((r) => r.id !== id);
+      else next.expense.customRows[sectionKey] = (next.expense.customRows[sectionKey] || []).filter((r) => r.id !== id);
+      return next;
+    });
+  };
+  const moveCustomRow = (kind, sectionKey, id, dir) => () => {
+    recordHistory();
+    setSim((prev) => {
+      const next = clone(prev);
+      const list = kind === "income" ? next.income.customRows : next.expense.customRows?.[sectionKey];
+      if (!list) return prev;
+      const idx = list.findIndex((r) => r.id === id);
+      const swapIdx = dir === "up" ? idx - 1 : idx + 1;
+      if (idx === -1 || swapIdx < 0 || swapIdx >= list.length) return prev;
+      [list[idx], list[swapIdx]] = [list[swapIdx], list[idx]];
+      return next;
+    });
+  };
+  // 学費・医療・車・他生活費・交際費等・収入の各セクションに、カスタム行の編集用の行データと
+  // 「＋ 行を追加」ボタンを付け足す
+  const customRowsBlock = (kind, sectionKey) => {
+    const rows = customRowsFor(kind, sectionKey);
+    return {
+      rows: rows.map((r, i) => ({
+        id: r.id, label: r.label, arr: r.arr, onChange: updateCustomRowValue(kind, sectionKey, r.id),
+        custom: true, onLabelChange: renameCustomRow(kind, sectionKey, r.id),
+        onDelete: deleteCustomRow(kind, sectionKey, r.id, r.label),
+        onMoveUp: i > 0 ? moveCustomRow(kind, sectionKey, r.id, "up") : null,
+        onMoveDown: i < rows.length - 1 ? moveCustomRow(kind, sectionKey, r.id, "down") : null,
+      })),
+      addButton: (
+        <button onClick={() => addCustomRow(kind, sectionKey)} style={{
+          marginTop: 6, fontSize: 11, padding: "5px 10px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`,
+          background: "#FFFDF9", color: INK_SOFT, cursor: "pointer",
+        }}>＋ 行を追加</button>
+      ),
+    };
+  };
 
   const chartData = YEARS.map((y, i) => ({
     year: y,
@@ -2520,10 +2663,13 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
 
       <SectionHeader title="支出の内訳を編集" sub="カテゴリをタップすると年ごとの金額（万円）を編集できます。1年に入力すると、それ以降も同じ金額が自動で続きます"
         rightSlot={
-          <button onClick={onOpenSheet} style={{
-            fontSize: 11.5, padding: "6px 10px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`,
-            background: CARD, color: INK, cursor: "pointer", whiteSpace: "nowrap",
-          }}>📋 一覧を見る</button>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <UndoRedoControls />
+            <button onClick={onOpenSheet} style={{
+              fontSize: 11.5, padding: "6px 10px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`,
+              background: CARD, color: INK, cursor: "pointer", whiteSpace: "nowrap",
+            }}>📋 一覧を見る</button>
+          </div>
         }
       />
       <div style={{ padding: "0 16px" }}>
@@ -2536,7 +2682,8 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
             { label: "子供3", arr: sim.expense.tuition.child3, onChange: mk("tuition.child3"), wizard: isWizard("tuition.child3") },
             { label: "（習い事等）", arr: sim.expense.tuition.child3_extra, onChange: mk("tuition.child3_extra"), indent: true },
             { label: "子供下宿", arr: sim.expense.dorm, onChange: mk("dorm") },
-          ]} />
+            ...customRowsBlock("expense", "tuition").rows,
+          ]} addButton={customRowsBlock("expense", "tuition").addButton} />
         </Accordion>
         <Accordion title="医療・介護" colorKey="medical">
           <EditTable rows={[
@@ -2545,7 +2692,8 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
             { label: "父方祖母", arr: sim.expense.medical.gmother_p, onChange: mk("medical.gmother_p") },
             { label: "母方祖父", arr: sim.expense.medical.gfather_m, onChange: mk("medical.gfather_m") },
             { label: "母方祖母", arr: sim.expense.medical.gmother_m, onChange: mk("medical.gmother_m") },
-          ]} />
+            ...customRowsBlock("expense", "medical").rows,
+          ]} addButton={customRowsBlock("expense", "medical").addButton} />
         </Accordion>
         <Accordion title={params.housingPlanEnabled ? "住宅（ローン試算）" : `住宅（${HOUSING_LABELS[params.housingType]}）`} colorKey="housing" onWizard={() => onOpenWizard("housing")} wizardLabel="住宅ウィザード">
           {params.housingPlanEnabled ? (
@@ -2572,6 +2720,7 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
           ) : (
             <EditTable rows={[{ label: "賃貸→分譲費用", arr: sim.expense.housing_opt4_rent_to_condo, onChange: mk("housing_opt4_rent_to_condo") }]} />
           )}
+          <EditTable rows={customRowsBlock("expense", "housing").rows} addButton={customRowsBlock("expense", "housing").addButton} />
         </Accordion>
         <Accordion title="車" colorKey="car" onWizard={() => onOpenWizard("car")} wizardLabel="車ウィザード">
           <EditTable rows={[
@@ -2582,7 +2731,8 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
             { label: "税金", arr: sim.expense.car.tax, onChange: mk("car.tax"), wizard: isWizard("car.tax") },
             { label: "車検", arr: sim.expense.car.inspection, onChange: mk("car.inspection"), wizard: isWizard("car.inspection") },
             { label: "他経費", arr: sim.expense.car.other, onChange: mk("car.other"), wizard: isWizard("car.other") },
-          ]} />
+            ...customRowsBlock("expense", "car").rows,
+          ]} addButton={customRowsBlock("expense", "car").addButton} />
         </Accordion>
         <Accordion title="他生活費" colorKey="living">
           <EditTable rows={[
@@ -2590,7 +2740,8 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
             { label: "光熱費", arr: sim.expense.living.utilities, onChange: mk("living.utilities") },
             { label: "通信費", arr: sim.expense.living.communication, onChange: mk("living.communication") },
             { label: "日用品・衣服", arr: sim.expense.living.daily_goods, onChange: mk("living.daily_goods") },
-          ]} />
+            ...customRowsBlock("expense", "living").rows,
+          ]} addButton={customRowsBlock("expense", "living").addButton} />
         </Accordion>
         <Accordion title="交際費・レジャー・その他・突発" colorKey="social">
           <EditTable rows={[
@@ -2598,11 +2749,12 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
             { label: "レジャー他", arr: sim.expense.leisure, onChange: mk("leisure") },
             { label: "その他", arr: sim.expense.other, onChange: mk("other") },
             { label: "突発", arr: sim.expense.sudden, onChange: mk("sudden") },
-          ]} />
+            ...customRowsBlock("expense", "social").rows,
+          ]} addButton={customRowsBlock("expense", "social").addButton} />
         </Accordion>
       </div>
 
-      <SectionHeader title="収入の内訳を編集" />
+      <SectionHeader title="収入の内訳を編集" rightSlot={<UndoRedoControls />} />
       <div style={{ padding: "0 16px 8px" }}>
         <Accordion title="収入" colorKey="tuition" defaultOpen>
           <EditTable rows={[
@@ -2612,7 +2764,8 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
             { label: "子供手当等", arr: sim.income.other_childAllowance, onChange: mkInc("other_childAllowance") },
             { label: "年金・退職金", arr: sim.income.pension_retirement, onChange: mkInc("pension_retirement") },
             { label: "配当収入（自動計算）", arr: model.dividend },
-          ]} />
+            ...customRowsBlock("income", null).rows,
+          ]} addButton={customRowsBlock("income", null).addButton} />
           <div style={{ fontSize: 11.5, color: INK_SOFT, marginTop: 8 }}>配当収入 ＝ 前年末の金融資産 × 配当利回り</div>
         </Accordion>
       </div>
