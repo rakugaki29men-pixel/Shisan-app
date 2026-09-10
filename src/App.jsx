@@ -462,13 +462,35 @@ function defaultScenarioState() {
 }
 
 /* ============================================================
-   価格自動取得（準備中）
-   Claude.aiアーティファクト専用のweb検索ツール経由の取得方式は
-   独立アプリでは動作しないため、本物の金融データAPI（yfinance/
-   CoinGecko等）に置き換えるまでの間、明示的に「準備中」を返す。
+   価格自動取得
+   フロントエンドとは別にRenderへデプロイする、専用の価格取得API
+   （price-server/、yfinanceベース・無料）から為替レート・株価/ETF
+   価格を取得する。投資信託（qtyMode: "nav10000"）はYahoo Finance
+   にティッカーが存在しないため対象外（引き続き手入力が必要）。
    ============================================================ */
-async function callClaudeWithSearch(promptText) {
-  throw new Error("価格の自動取得は現在準備中です（次のステップで本物の金融データAPIに置き換えます）。今は手入力をご利用ください。");
+const PRICE_API_BASE = (import.meta.env.VITE_PRICE_API_URL || "").replace(/\/$/, "");
+
+// 保有銘柄の取引所・ティッカーから、yfinance互換のシンボルを組み立てる
+// （投資信託や、取引所・ティッカーが不明な銘柄はnullを返し取得対象外にする）
+function yfSymbolFor(h) {
+  if (h.qtyMode === "nav10000") return null;
+  const ticker = h.ticker;
+  if (ticker === null || ticker === undefined || ticker === "") return null;
+  if (h.exchange === "TYO") {
+    const t = String(ticker).replace(/\.0$/, "");
+    return `${t}.T`;
+  }
+  if (!h.exchange) {
+    if (["BTC", "ETH"].includes(String(ticker).toUpperCase())) return `${ticker}-USD`;
+    return null;
+  }
+  return String(ticker);
+}
+
+async function fetchJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`価格取得サーバーへの接続に失敗しました（${res.status}）`);
+  return res.json();
 }
 
 function chunk(arr, size) {
@@ -482,53 +504,43 @@ function chunk(arr, size) {
    （ポートフォリオタブ／資産集計タブの両方から利用）
    ============================================================ */
 async function fetchPricesAsOf(dateStr, holdings, fallbackFx, onStatus) {
+  if (!PRICE_API_BASE) {
+    throw new Error("価格取得サーバーが設定されていません。しばらくお待ちいただくか、今は手入力をご利用ください。");
+  }
   const todayStr = new Date().toISOString().slice(0, 10);
   const isHistorical = dateStr !== todayStr;
   let fxRate = fallbackFx;
 
   onStatus?.(isHistorical ? `${dateStr}時点の為替レートを取得中…` : "現在の為替レートを取得中…");
   try {
-    const fxPrompt = isHistorical
-      ? `Search the web for the historical USD/JPY exchange rate on ${dateStr} (use the closing rate on that date, or the nearest prior business day if markets were closed). Respond with ONLY JSON, no prose, no markdown fences: {"usdjpy": <number>, "dateUsed": "YYYY-MM-DD"}`
-      : 'Search the web for today\'s current USD/JPY exchange rate. Respond with ONLY JSON, no prose, no markdown fences: {"usdjpy": <number>}';
-    const fx = await callClaudeWithSearch(fxPrompt);
+    const fxUrl = `${PRICE_API_BASE}/fx${isHistorical ? `?date=${dateStr}` : ""}`;
+    const fx = await fetchJson(fxUrl);
     if (fx && typeof fx.usdjpy === "number") fxRate = fx.usdjpy;
   } catch (e) { /* keep fallback fx */ }
 
-  const targets = holdings.map((h, idx) => ({ ...h, idx })).filter((h) => h.autoFetchable && h.searchLabel);
-  const batches = chunk(targets, 8);
+  const targets = holdings
+    .map((h, idx) => ({ ...h, idx, symbol: yfSymbolFor(h) }))
+    .filter((h) => h.symbol);
+  const batches = chunk(targets, 20);
   const valueMap = {};
   let updated = 0, failed = 0;
 
   for (let b = 0; b < batches.length; b++) {
     onStatus?.(`${isHistorical ? dateStr + "時点の" : ""}銘柄価格を取得中… (${b + 1}/${batches.length})`);
     const batch = batches[b];
-    const list = batch.map((h) => {
-      const tag = h.qtyMode === "nav10000" ? "[投資信託・基準価額を1万口あたりで]" : "[個別銘柄/ETF・1株あたりの価格]";
-      return `i=${h.idx}: ${tag} ${h.searchLabel}`;
-    }).join("\n");
-    const prompt = isHistorical
-      ? `Use web search (historical price data pages such as Yahoo Finance historical prices, stooq, Japanese fund NAV history pages, or similar) to find the CLOSING price/NAV on ${dateStr} for each of these items (use the nearest prior trading/business day if closed on that exact date). For items tagged [投資信託], find the 基準価額 (NAV) per 10,000 units in JPY. For items tagged [個別銘柄/ETF], find the per-share closing price:\n${list}\n\nRespond with ONLY a JSON array, no prose, no markdown fences, in this exact format:\n[{"i":<index number>,"price":<price as a plain number>,"currency":"USD" or "JPY","asOf":"<actual date used, YYYY-MM-DD>"}]\nIf a price cannot be found for an item, omit it from the array.`
-      : `Use web search to find the current/latest price for each of these items. For items tagged [投資信託], find the current 基準価額 (NAV) per 10,000 units in JPY. For items tagged [個別銘柄/ETF], find the current per-share price:\n${list}\n\nRespond with ONLY a JSON array, no prose, no markdown fences, in this exact format:\n[{"i":<index number>,"price":<price as a plain number>,"currency":"USD" or "JPY","asOf":"<date found, YYYY-MM-DD>"}]\nIf a price cannot be found for an item, omit it from the array.`;
     try {
-      const results = await callClaudeWithSearch(prompt);
-      if (Array.isArray(results)) {
-        results.forEach((r) => {
-          const idx = r.i;
-          const h = holdings[idx];
-          if (typeof idx !== "number" || !h || typeof r.price !== "number") return;
-          let valueJpy;
-          if (h.qtyMode === "nav10000") {
-            valueJpy = ((h.unitsImplied || 0) / 10000) * r.price;
-          } else if (r.currency === "USD") {
-            valueJpy = h.qty * r.price * fxRate;
-          } else {
-            valueJpy = h.qty * r.price;
-          }
-          valueMap[idx] = { valueJpy, price: r.price, currency: r.currency, asOf: r.asOf || dateStr };
-          updated++;
-        });
-      }
+      const symbolsParam = [...new Set(batch.map((h) => h.symbol))].join(",");
+      const url = `${PRICE_API_BASE}/prices?symbols=${encodeURIComponent(symbolsParam)}${isHistorical ? `&date=${dateStr}` : ""}`;
+      const results = await fetchJson(url);
+      const bySymbol = {};
+      if (Array.isArray(results)) results.forEach((r) => { bySymbol[r.symbol] = r; });
+      batch.forEach((h) => {
+        const r = bySymbol[h.symbol];
+        if (!r || typeof r.price !== "number") { failed++; return; }
+        const valueJpy = r.currency === "USD" ? h.qty * r.price * fxRate : h.qty * r.price;
+        valueMap[h.idx] = { valueJpy, price: r.price, currency: r.currency, asOf: r.asOf || dateStr };
+        updated++;
+      });
     } catch (e) {
       failed += batch.length;
     }
@@ -3066,14 +3078,13 @@ function AddHoldingForm({ onAdd, fxRate }) {
 
   const search = async () => {
     if (!query.trim()) return;
+    if (!PRICE_API_BASE) {
+      setError("銘柄検索サーバーが設定されていません。今は「銘柄を手入力する」をご利用ください。");
+      return;
+    }
     setSearching(true); setError(""); setCandidates(null); setPicked(null);
     try {
-      const prompt = `A user wants to identify a specific tradable financial instrument matching this query: "${query}".
-Use web search to confirm details. It could be a stock, ETF, cryptocurrency, or Japanese/global investment trust (投資信託).
-Respond with ONLY JSON, no prose, no markdown fences, in this exact format:
-{"candidates":[{"name":"<official name>","exchange":"<exchange code, e.g. NASDAQ, NYSEARCA, TYO — empty string if a mutual fund/investment trust with no exchange ticker>","ticker":"<ticker symbol, or empty string for a mutual fund>","instrumentType":"個別銘柄"|"ETF"|"仮想通貨"|"投信","currency":"USD"|"JPY","assetCat":"株式"|"コモディティ"|"債権"|"その他"}]}
-Include up to 3 plausible candidates, best match first. If nothing plausible is found, return {"candidates":[]}.`;
-      const res = await callClaudeWithSearch(prompt);
+      const res = await fetchJson(`${PRICE_API_BASE}/search?q=${encodeURIComponent(query.trim())}`);
       const list = Array.isArray(res?.candidates) ? res.candidates : [];
       if (list.length === 0) setError("見つかりませんでした。名称やティッカーを変えて試してください。");
       setCandidates(list);
@@ -3089,14 +3100,21 @@ Include up to 3 plausible candidates, best match first. If nothing plausible is 
     setQtyInput("1");
     setPriceInput("");
     setPriceNote("");
+    const isFund = c.instrumentType === "投信" || !c.exchange;
+    if (isFund) {
+      // 投資信託はyfinanceに基準価額データが無いため自動取得の対象外
+      setPriceNote("投資信託は現在価格の自動取得に対応していません。取得単価を手入力してください。");
+      return;
+    }
+    const symbol = yfSymbolFor({ qtyMode: null, ticker: c.ticker, exchange: c.exchange });
+    if (!symbol || !PRICE_API_BASE) {
+      setPriceNote("現在価格が見つかりませんでした。取得単価を手入力してください。");
+      return;
+    }
     // 選択直後に現在価格を検索して、取得単価のデフォルトに使う
     setPriceFetching(true);
     try {
-      const isFund = c.instrumentType === "投信" || !c.exchange;
-      const label = isFund ? c.name : `${c.exchange}:${c.ticker}`;
-      const tag = isFund ? "[投資信託・基準価額を1万口あたりで]" : "[個別銘柄/ETF・1株あたりの価格]";
-      const prompt = `Use web search to find the current/latest price for this item. For items tagged [投資信託], find the current 基準価額 (NAV) per 10,000 units in JPY. For items tagged [個別銘柄/ETF], find the current per-share price:\ni=0: ${tag} ${label}\n\nRespond with ONLY a JSON array, no prose, no markdown fences:\n[{"i":0,"price":<price as a plain number>,"currency":"USD" or "JPY","asOf":"<date found, YYYY-MM-DD>"}]\nIf not found, respond with [].`;
-      const results = await callClaudeWithSearch(prompt);
+      const results = await fetchJson(`${PRICE_API_BASE}/prices?symbols=${encodeURIComponent(symbol)}`);
       const r = Array.isArray(results) ? results[0] : null;
       if (r && typeof r.price === "number") {
         setPriceInput(String(r.price));
