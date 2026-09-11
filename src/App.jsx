@@ -3133,6 +3133,7 @@ function AddHoldingForm({ onAdd, fxRate, cashList, pendingAccountId, onRequestAc
   const [priceFetching, setPriceFetching] = useState(false);
   const [priceNote, setPriceNote] = useState("");
   const [open, setOpen] = useState(false);
+  const [reflectCashOnAdd, setReflectCashOnAdd] = useState(true);
 
   const search = async () => {
     if (!query.trim()) return;
@@ -3224,7 +3225,8 @@ function AddHoldingForm({ onAdd, fxRate, cashList, pendingAccountId, onRequestAc
       unitsImplied: isFund ? qty : null,
       lastUpdated: null,
     };
-    onAdd(newHolding);
+    const cashDelta = reflectCashOnAdd && pendingAccountId ? -avgJpyTotal : 0;
+    onAdd(newHolding, cashDelta);
     setQuery(""); setCandidates(null); setPicked(null); setQtyInput("1"); setPriceInput(""); setOpen(false);
   };
 
@@ -3355,7 +3357,10 @@ function AddHoldingForm({ onAdd, fxRate, cashList, pendingAccountId, onRequestAc
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 {pendingAccountId ? (
                   <>
-                    <span style={{ fontSize: 12, color: INK }}>{cashList.find((c) => c.id === pendingAccountId)?.bank || "（口座名未設定）"}</span>
+                    <span style={{ fontSize: 12, color: INK }}>
+                      No.{cashList.findIndex((c) => c.id === pendingAccountId) + 1}
+                      {(() => { const b = cashList.find((c) => c.id === pendingAccountId)?.bank; return b ? `（${b}）` : ""; })()}
+                    </span>
                     <button onClick={onRequestAccountPick} style={{ fontSize: 10.5, padding: "2px 8px", borderRadius: 10, border: `1px solid ${PAPER_LINE}`, background: "#fff", color: INK_SOFT, cursor: "pointer" }}>変更</button>
                     <button onClick={onClearAccountId} style={{ fontSize: 10.5, padding: "2px 8px", borderRadius: 10, border: `1px solid ${PAPER_LINE}`, background: "#fff", color: INK_SOFT, cursor: "pointer" }}>解除</button>
                   </>
@@ -3365,6 +3370,12 @@ function AddHoldingForm({ onAdd, fxRate, cashList, pendingAccountId, onRequestAc
                   </button>
                 )}
               </div>
+              {pendingAccountId && (
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, marginTop: 6, cursor: "pointer" }}>
+                  <input type="checkbox" checked={reflectCashOnAdd} onChange={(e) => setReflectCashOnAdd(e.target.checked)} />
+                  現金データにも反映する（選んだ口座から取得額合計を減らす）
+                </label>
+              )}
 
               <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                 <button onClick={confirmAdd} disabled={priceFetching} style={{ fontSize: 12, padding: "6px 12px", borderRadius: 4, border: "none", background: SUMI, color: "#fff", cursor: "pointer" }}>この内容で追加</button>
@@ -3525,7 +3536,9 @@ function HoldingCard({ h, idx, onUpdate, onDelete, fxRate, fmtCur = fmtYen, cash
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
             {linkedCashRow ? (
               <>
-                <span style={{ fontSize: 12, color: INK }}>{linkedCashRow.bank || "（口座名未設定）"}</span>
+                <span style={{ fontSize: 12, color: INK }}>
+                  No.{cashList.findIndex((c) => c.id === h.linkedCashId) + 1}{linkedCashRow.bank ? `（${linkedCashRow.bank}）` : ""}
+                </span>
                 <button onClick={() => onRequestAccountPick(idx)} style={{ fontSize: 10.5, padding: "2px 8px", borderRadius: 10, border: `1px solid ${PAPER_LINE}`, background: "#fff", color: INK_SOFT, cursor: "pointer" }}>変更</button>
                 <button onClick={() => onUpdate({ linkedCashId: null })} style={{ fontSize: 10.5, padding: "2px 8px", borderRadius: 10, border: `1px solid ${PAPER_LINE}`, background: "#fff", color: INK_SOFT, cursor: "pointer" }}>解除</button>
               </>
@@ -3834,6 +3847,30 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
   const totalCost = holdings.reduce((s, h) => s + (h.avgJpyTotal || 0), 0);
   const totalPl = holdings.reduce((s, h) => s + ((h.valueJpy || 0) - (h.avgJpyTotal || 0)), 0);
 
+  // 保有銘柄・現金の編集用の元に戻す・やり直す（最大5件、このタブでの編集のみが対象。価格の自動取得も含む）
+  const [undoStack, setUndoStack] = useState([]);
+  const [redoStack, setRedoStack] = useState([]);
+  const recordHistory = () => {
+    setUndoStack((stack) => [...stack, { holdings: clone(holdings), cashList: clone(cashList) }].slice(-5));
+    setRedoStack([]);
+  };
+  const undo = () => {
+    if (undoStack.length === 0) return;
+    const prev = undoStack[undoStack.length - 1];
+    setRedoStack((r) => [...r, { holdings: clone(holdings), cashList: clone(cashList) }].slice(-5));
+    setUndoStack((stack) => stack.slice(0, -1));
+    setHoldings(prev.holdings);
+    setCashList(prev.cashList);
+  };
+  const redo = () => {
+    if (redoStack.length === 0) return;
+    const next = redoStack[redoStack.length - 1];
+    setUndoStack((stack) => [...stack, { holdings: clone(holdings), cashList: clone(cashList) }].slice(-5));
+    setRedoStack((r) => r.slice(0, -1));
+    setHoldings(next.holdings);
+    setCashList(next.cashList);
+  };
+
   const [displayCurrency, setDisplayCurrency] = useState("JPY");
   const fmtCur = (jpy) => displayCurrency === "USD" ? "$" + fmt((jpy || 0) / (params.fxRate || 150), 2) : fmtYen(jpy);
 
@@ -3859,6 +3896,7 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
   const isHistorical = asOfDate !== todayStr;
 
   const fetchLatestPrices = async () => {
+    recordHistory();
     setFetching(true);
     try {
       const { fxRate, valueMap, updated, failed } = await fetchPricesAsOf(asOfDate, holdings, params.fxRate, setFetchStatus);
@@ -3896,6 +3934,7 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
   });
 
   const updateHoldingPatch = (idx, patch) => {
+    recordHistory();
     setHoldings((prev) => {
       const next = [...prev];
       next[idx] = { ...next[idx], ...patch };
@@ -3903,17 +3942,20 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
     });
   };
   const updateCash = (idx, value) => {
+    recordHistory();
     setCashList((prev) => { const next = [...prev]; next[idx] = { ...next[idx], amount: value }; return next; });
   };
   const updateCashField = (idx, field, value) => {
+    recordHistory();
     setCashList((prev) => { const next = [...prev]; next[idx] = { ...next[idx], [field]: value }; return next; });
   };
-  const addCash = () => setCashList((prev) => [...prev, { bank: "", amount: 0, id: genCashId() }]);
+  const addCash = () => { recordHistory(); setCashList((prev) => [...prev, { bank: "", amount: 0, id: genCashId() }]); };
   const cashDrag = useDragReorder((order, from, to) => setCashList((prev) => reorderArrayBySlots(prev, order, from, to)));
   const holdingDrag = useDragReorder((order, from, to) => setHoldings((prev) => reorderArrayBySlots(prev, order, from, to)));
-  const deleteCash = (idx) => setCashList((prev) => prev.filter((_, i) => i !== idx));
+  const deleteCash = (idx) => { recordHistory(); setCashList((prev) => prev.filter((_, i) => i !== idx)); };
   const deleteHolding = (idx) => {
     if (!window.confirm("この銘柄を削除しますか？")) return;
+    recordHistory();
     setHoldings((prev) => prev.filter((_, i) => i !== idx));
   };
 
@@ -3966,12 +4008,16 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
 
   return (
     <div style={{ paddingBottom: 40 }}>
-      <SectionHeader title="保有ポートフォリオ" sub="評価額・取得額を編集すると合計と集計に反映されます" rightSlot={
+      <SectionHeader title="保有ポートフォリオ" sub="評価額・取得額を編集すると合計と集計に反映されます（価格の自動取得も含め、直前5件までやり直せます）" rightSlot={
         <div style={{ display: "flex", gap: 6 }}>
-          <button onClick={() => setShowClassManager(true)} title="資産クラス・サブクラスを編集" style={{
-            fontSize: 11.5, padding: "6px 10px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`,
-            background: CARD, color: INK, cursor: "pointer", whiteSpace: "nowrap",
-          }}>🔧</button>
+          <button onClick={undo} disabled={undoStack.length === 0} title="元に戻す" style={{
+            border: `1px solid ${PAPER_LINE}`, background: "#fff", borderRadius: 4, padding: "5px 8px",
+            fontSize: 13, cursor: undoStack.length === 0 ? "default" : "pointer", opacity: undoStack.length === 0 ? 0.35 : 1,
+          }}>↩️</button>
+          <button onClick={redo} disabled={redoStack.length === 0} title="やり直す" style={{
+            border: `1px solid ${PAPER_LINE}`, background: "#fff", borderRadius: 4, padding: "5px 8px",
+            fontSize: 13, cursor: redoStack.length === 0 ? "default" : "pointer", opacity: redoStack.length === 0 ? 0.35 : 1,
+          }}>↪️</button>
           <button onClick={() => setFilterOpen(true)} style={{
             fontSize: 11.5, padding: "6px 10px", borderRadius: 4, border: `1px solid ${isFiltering ? GOLD : PAPER_LINE}`,
             background: isFiltering ? GOLD_SOFT : CARD, color: INK, cursor: "pointer", whiteSpace: "nowrap",
@@ -4021,7 +4067,19 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
 
       <div style={{ padding: "0 16px" }} ref={addFormRef}>
         <AddHoldingForm
-          onAdd={(h) => { setHoldings((prev) => [...prev, h]); setPendingNewAccountId(null); }}
+          onAdd={(h, cashDelta) => {
+            recordHistory();
+            setHoldings((prev) => {
+              const cat = h.assetCat || "その他";
+              const topIdx = prev.findIndex((x) => (x.assetCat || "その他") === cat);
+              if (topIdx === -1) return [...prev, h];
+              return [...prev.slice(0, topIdx), h, ...prev.slice(topIdx)];
+            });
+            if (cashDelta && h.linkedCashId) {
+              setCashList((prev) => prev.map((c) => c.id === h.linkedCashId ? { ...c, amount: (c.amount || 0) + cashDelta } : c));
+            }
+            setPendingNewAccountId(null);
+          }}
           fxRate={params.fxRate}
           cashList={cashList}
           pendingAccountId={pendingNewAccountId}
