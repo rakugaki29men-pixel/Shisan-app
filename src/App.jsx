@@ -473,6 +473,7 @@ function defaultParamsState() {
     cash0: RAW.init.cash0,
     fxRate: RAW.portfolio.usdjpy || 150,
     fxRates: { USD: RAW.portfolio.usdjpy || 150 },
+    reinvestDividends: false,
     simStartYear: RAW.sim.years[0],
     wageGrowthRate: 0,
     downPayment: 0,
@@ -848,7 +849,7 @@ function computeModel(sim, params) {
     dividend[i] = i === 0 ? 0 : securities[i - 1] * params.dividendRate;
 
     incomeTotal[i] = (inc.father[i] ?? 0) + (inc.mother[i] ?? 0) + (inc.taxRefund[i] ?? 0) +
-      dividend[i] + (inc.other_childAllowance[i] ?? 0) + (inc.pension_retirement[i] ?? 0) + sumCustomAt(inc.customRows, i);
+      (params.reinvestDividends ? 0 : dividend[i]) + (inc.other_childAllowance[i] ?? 0) + (inc.pension_retirement[i] ?? 0) + sumCustomAt(inc.customRows, i);
 
     balance[i] = incomeTotal[i] - expenseTotal[i];
 
@@ -858,12 +859,13 @@ function computeModel(sim, params) {
     } else {
       const cashPrev = cash[i - 1];
       const secPrev = securities[i - 1];
+      const reinvested = params.reinvestDividends ? dividend[i] : 0;
       if (cashPrev + balance[i] < 0) {
         cash[i] = 0;
-        securities[i] = (secPrev + cashPrev + balance[i]) * params.growthRate;
+        securities[i] = (secPrev + cashPrev + balance[i]) * params.growthRate + reinvested;
       } else {
         cash[i] = cashPrev + balance[i];
-        securities[i] = secPrev * params.growthRate;
+        securities[i] = secPrev * params.growthRate + reinvested;
       }
     }
     assetTotal[i] = securities[i] + cash[i] + realEstateAsset[i];
@@ -909,8 +911,8 @@ function TabBar({ tabs, active, onChange }) {
 
 function SectionHeader({ title, sub, rightSlot }) {
   return (
-    <div style={{ padding: "18px 16px 8px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
+    <div style={{ padding: "18px 16px 8px", display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+      <div style={{ flex: 1, minWidth: 220 }}>
         <h2 style={{
           margin: 0, fontFamily: "'Shippori Mincho','Noto Serif JP',serif", fontSize: 19,
           color: INK, letterSpacing: "0.03em", borderLeft: `4px solid ${GOLD}`, paddingLeft: 10,
@@ -1041,10 +1043,10 @@ function Accordion({ title, colorKey, defaultOpen, children, rightSlot, onWizard
 // 横スクロール・年次編集テーブル（帳簿の見開きページ風）
 const EDIT_TABLE_LABEL_WIDTH = 128;
 
-function YearRow({ label, arr, onChange, indent, wizard, custom, onLabelChange, onDelete, onMoveUp, onMoveDown }) {
+function YearRow({ label, arr, onChange, indent, wizard, custom, onLabelChange, onDelete, onMoveUp, onMoveDown, dimmed }) {
   const bg = wizard ? SUMI_SOFT : CARD;
   return (
-    <div style={{ display: "flex", alignItems: "center", borderBottom: `1px solid ${PAPER_LINE}` }}>
+    <div style={{ display: "flex", alignItems: "center", borderBottom: `1px solid ${PAPER_LINE}`, opacity: dimmed ? 0.4 : 1 }}>
       <div style={{
         width: EDIT_TABLE_LABEL_WIDTH, flexShrink: 0, display: "flex", alignItems: "center", gap: 2,
         padding: "4px 6px 4px " + (indent ? "16px" : "6px"),
@@ -1102,7 +1104,7 @@ function EditTable({ rows, addButton }) {
           <YearHeader />
           {rows.map((r) => (
             <YearRow key={r.id || r.label} label={r.label} arr={r.arr} onChange={r.onChange} indent={r.indent} wizard={r.wizard}
-              custom={r.custom} onLabelChange={r.onLabelChange} onDelete={r.onDelete} onMoveUp={r.onMoveUp} onMoveDown={r.onMoveDown} />
+              custom={r.custom} onLabelChange={r.onLabelChange} onDelete={r.onDelete} onMoveUp={r.onMoveUp} onMoveDown={r.onMoveDown} dimmed={r.dimmed} />
           ))}
         </div>
       </div>
@@ -2218,6 +2220,14 @@ function SettingsModal({ sim, setSim, params, setParams, onOpenFamily, onOpenWiz
                 onChange={(v) => setParams((p) => ({ ...p, growthRate: 1 + v / 100 }))} />
               <ParamField label="配当利回り" value={params.dividendRate * 100} suffix="%"
                 onChange={(v) => setParams((p) => ({ ...p, dividendRate: v / 100 }))} />
+              <label style={{
+                display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: INK_SOFT, cursor: "pointer",
+                background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: "8px 12px", flex: "1 1 220px",
+              }}>
+                <input type="checkbox" checked={!!params.reinvestDividends}
+                  onChange={(e) => setParams((p) => ({ ...p, reinvestDividends: e.target.checked }))} />
+                配当金を再投資する（複利効果を反映。収入からは除外されます）
+              </label>
               <ParamField label="住宅ローン金利" value={params.loanRate * 100} suffix="%"
                 onChange={(v) => setParams((p) => ({ ...p, loanRate: v / 100 }))}
                 disabled={params.housingPlanEnabled}
@@ -2555,10 +2565,28 @@ function AssetChartTooltip({ active, payload, label }) {
   );
 }
 
-function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, onOpenWizard, onOpenSheet }) {
+function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, holdings, onOpenWizard, onOpenSheet }) {
   const model = useMemo(() => computeModel(sim, params), [sim, params]);
   const [activeMarker, setActiveMarker] = useState(null);
   const [showScenario, setShowScenario] = useState(false);
+
+  // 現在の保有比率（アセットクラスごと）を、金融資産の推移にそのまま当てはめた試算表示
+  const classWeights = useMemo(() => {
+    const totals = {};
+    let total = 0;
+    (holdings || []).forEach((h) => {
+      const cat = h.assetCat || "その他";
+      totals[cat] = (totals[cat] || 0) + (h.valueJpy || 0);
+      total += h.valueJpy || 0;
+    });
+    return Object.fromEntries(Object.entries(totals).map(([k, v]) => [k, total > 0 ? v / total : 0]));
+  }, [holdings]);
+  const assetClassRows = useMemo(() => {
+    return Object.entries(classWeights)
+      .filter(([, w]) => w > 0)
+      .sort((a, b) => b[1] - a[1])
+      .map(([cat, w]) => ({ label: cat, arr: model.securities.map((v) => v * w) }));
+  }, [classWeights, model.securities]);
 
   // 支出／収入の内訳編集用の元に戻す・やり直す（最大5件、このタブでの編集のみが対象）
   const [undoStack, setUndoStack] = useState([]);
@@ -2876,10 +2904,24 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
             { label: "税還付金他", arr: sim.income.taxRefund, onChange: mkInc("taxRefund") },
             { label: "子供手当等", arr: sim.income.other_childAllowance, onChange: mkInc("other_childAllowance") },
             { label: "年金・退職金", arr: sim.income.pension_retirement, onChange: mkInc("pension_retirement") },
-            { label: "配当収入（自動計算）", arr: model.dividend },
+            { label: params.reinvestDividends ? "配当収入（再投資中のため収入から除外）" : "配当収入（自動計算）", arr: model.dividend, dimmed: params.reinvestDividends },
             ...customRowsBlock("income", null).rows,
           ]} addButton={customRowsBlock("income", null).addButton} />
-          <div style={{ fontSize: 11.5, color: INK_SOFT, marginTop: 8 }}>配当収入 ＝ 前年末の金融資産 × 配当利回り</div>
+          <div style={{ fontSize: 11.5, color: INK_SOFT, marginTop: 8 }}>
+            配当収入 ＝ 前年末の金融資産 × 配当利回り
+            {params.reinvestDividends && "（現在「配当金を再投資する」がオンのため、収入には合算されず金融資産に直接組み込まれます）"}
+          </div>
+        </Accordion>
+      </div>
+
+      <SectionHeader title="資産額（試算）" sub="現在の保有比率に、金融資産の年間成長率を当てはめた推計です" />
+      <div style={{ padding: "0 16px 8px" }}>
+        <Accordion title="資産額" colorKey="tuition">
+          <EditTable rows={[
+            ...assetClassRows,
+            { label: "現金", arr: model.cash },
+            { label: "金融資産 合計", arr: model.securities },
+          ]} />
         </Accordion>
       </div>
     </div>
@@ -5248,7 +5290,7 @@ export default function App() {
         onChange={setTab}
       />
 
-      {tab === "sim" && <SimulationTab sim={sim} setSim={setSim} params={params} setParams={setParams} scenario={scenario} setScenario={setScenario} onOpenWizard={openCostWizard} onOpenSheet={() => setShowSheet(true)} />}
+      {tab === "sim" && <SimulationTab sim={sim} setSim={setSim} params={params} setParams={setParams} scenario={scenario} setScenario={setScenario} holdings={holdings} onOpenWizard={openCostWizard} onOpenSheet={() => setShowSheet(true)} />}
       {tab === "portfolio" && <PortfolioTab holdings={holdings} setHoldings={setHoldings} cashList={cashList} setCashList={setCashList} params={params} setParams={setParams} asOfDate={asOfDate} setAsOfDate={setAsOfDate} assetClassList={assetClassList} setAssetClassList={setAssetClassList} subclassSuggestions={subclassSuggestions} setSubclassSuggestions={setSubclassSuggestions} />}
       {tab === "aggregate" && <AggregationTab holdings={holdings} cashList={cashList} sim={sim} params={params} setParams={setParams} asOfDate={asOfDate} portfolioLogs={portfolioLogs} setPortfolioLogs={setPortfolioLogs} />}
       {showSheet && (
