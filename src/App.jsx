@@ -201,6 +201,14 @@ function reorderArrayBySlots(fullArray, order, fromPos, toPos) {
   return next;
 }
 
+// シンプルな配列の並べ替え（カスタム行など、フィルタのかからない一覧向け）
+function moveArrayItem(arr, from, to) {
+  const next = [...arr];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
+}
+
 function DragHandle({ dragProps, active }) {
   return (
     <span {...dragProps} style={{
@@ -952,6 +960,23 @@ function StatCard({ label, value, tone = "ink", small, corner }) {
   );
 }
 
+// シミュレーション（sim）の編集内容の元に戻す・やり直すボタン。
+// 「支出／収入の内訳を編集」の各画面と「全体シート」で同じ履歴を共有する
+function UndoRedoButtons({ onUndo, onRedo, canUndo, canRedo }) {
+  return (
+    <div style={{ display: "flex", gap: 4 }}>
+      <button onClick={onUndo} disabled={!canUndo} title="元に戻す" style={{
+        border: `1px solid ${PAPER_LINE}`, background: "#fff", borderRadius: 4, padding: "5px 8px",
+        fontSize: 13, cursor: canUndo ? "pointer" : "default", opacity: canUndo ? 1 : 0.35,
+      }}>↩️</button>
+      <button onClick={onRedo} disabled={!canRedo} title="やり直す" style={{
+        border: `1px solid ${PAPER_LINE}`, background: "#fff", borderRadius: 4, padding: "5px 8px",
+        fontSize: 13, cursor: canRedo ? "pointer" : "default", opacity: canRedo ? 1 : 0.35,
+      }}>↪️</button>
+    </div>
+  );
+}
+
 // カンマ区切り表示のできない <input type="number"> の代わりに使う、
 // 金額入力用の共通コンポーネント。編集中も数字はそのまま伝え、
 // 表示だけをカンマ区切りにする（フォーカスが外れたタイミングで整形し直す）
@@ -1047,21 +1072,23 @@ function Accordion({ title, colorKey, defaultOpen, children, rightSlot, onWizard
 // 横スクロール・年次編集テーブル（帳簿の見開きページ風）
 const EDIT_TABLE_LABEL_WIDTH = 128;
 
-function YearRow({ label, arr, onChange, indent, wizard, custom, onLabelChange, onDelete, onMoveUp, onMoveDown, dimmed }) {
-  const bg = wizard ? SUMI_SOFT : CARD;
+function YearRow({ label, arr, onChange, indent, wizard, custom, onLabelChange, onDelete, dimmed, dragHandleProps, isDragging, setRowRef }) {
+  const bg = isDragging ? GOLD_SOFT : wizard ? SUMI_SOFT : CARD;
   return (
-    <div style={{ display: "flex", alignItems: "center", borderBottom: `1px solid ${PAPER_LINE}`, opacity: dimmed ? 0.4 : 1 }}>
+    <div ref={setRowRef} style={{
+      display: "flex", alignItems: "center", borderBottom: `1px solid ${PAPER_LINE}`, opacity: dimmed ? 0.4 : 1,
+      boxShadow: isDragging ? "0 2px 8px rgba(0,0,0,0.18)" : "none", position: isDragging ? "relative" : "static", zIndex: isDragging ? 5 : "auto",
+    }}>
       <div style={{
-        width: EDIT_TABLE_LABEL_WIDTH, flexShrink: 0, display: "flex", alignItems: "center", gap: 2,
+        width: EDIT_TABLE_LABEL_WIDTH, flexShrink: 0, boxSizing: "border-box", display: "flex", alignItems: "center", gap: 2,
         padding: "4px 6px 4px " + (indent ? "16px" : "6px"),
         position: "sticky", left: 0, background: bg, zIndex: 2, borderRight: `1px solid ${PAPER_LINE}`,
       }}>
         {custom ? (
           <>
+            {dragHandleProps && <DragHandle dragProps={dragHandleProps} active={isDragging} />}
             <input value={label} onChange={(e) => onLabelChange(e.target.value)} placeholder="項目名"
               style={{ flex: 1, minWidth: 0, fontSize: 11, border: "none", background: "transparent", borderBottom: `1px dashed ${PAPER_LINE}`, padding: "2px 0", color: INK }} />
-            {onMoveUp && <button onClick={onMoveUp} title="上へ移動" style={{ flexShrink: 0, border: "none", background: "transparent", color: INK_SOFT, fontSize: 10, cursor: "pointer", padding: 0 }}>▲</button>}
-            {onMoveDown && <button onClick={onMoveDown} title="下へ移動" style={{ flexShrink: 0, border: "none", background: "transparent", color: INK_SOFT, fontSize: 10, cursor: "pointer", padding: 0 }}>▼</button>}
             <button onClick={onDelete} title="削除" style={{ flexShrink: 0, border: "none", background: "transparent", color: SEAL, fontSize: 13, cursor: "pointer", padding: 0 }}>×</button>
           </>
         ) : (
@@ -1072,7 +1099,7 @@ function YearRow({ label, arr, onChange, indent, wizard, custom, onLabelChange, 
       </div>
       <div style={{ display: "flex", background: bg }}>
         {YEARS.map((y, i) => (
-          <div key={y} style={{ padding: "5px 3px", borderRight: `1px solid ${PAPER_LINE}` }}>
+          <div key={y} style={{ width: 82, flexShrink: 0, boxSizing: "border-box", padding: "5px 3px", borderRight: `1px solid ${PAPER_LINE}` }}>
             <NumField value={arr[i]} onChange={onChange ? (v) => onChange(i, v) : undefined} readOnly={!onChange} />
           </div>
         ))}
@@ -1087,12 +1114,13 @@ function YearHeader() {
   return (
     <div style={{ display: "flex", position: "sticky", top: 0, zIndex: 3, background: INK }}>
       <div style={{
-        width: EDIT_TABLE_LABEL_WIDTH, flexShrink: 0, position: "sticky", left: 0, background: INK, zIndex: 4,
+        width: EDIT_TABLE_LABEL_WIDTH, flexShrink: 0, boxSizing: "border-box", position: "sticky", left: 0, background: INK, zIndex: 4,
         display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center",
         color: UNIT_LABEL_COLOR, fontSize: 10, fontWeight: 700, padding: "2px 2px", lineHeight: 1.2,
+        borderRight: `1px solid ${PAPER_LINE}`,
       }}>単位：万円</div>
       {YEARS.map((y) => (
-        <div key={y} style={{ width: 82, flexShrink: 0, textAlign: "center", color: PAPER, fontSize: 11.5, padding: "5px 0", borderRight: "1px solid #3A4C6B" }}>
+        <div key={y} style={{ width: 82, flexShrink: 0, boxSizing: "border-box", textAlign: "center", color: PAPER, fontSize: 11.5, padding: "5px 0", borderRight: "1px solid #3A4C6B" }}>
           '{String(y).slice(2)}
         </div>
       ))}
@@ -1108,7 +1136,8 @@ function EditTable({ rows, addButton }) {
           <YearHeader />
           {rows.map((r) => (
             <YearRow key={r.id || r.label} label={r.label} arr={r.arr} onChange={r.onChange} indent={r.indent} wizard={r.wizard}
-              custom={r.custom} onLabelChange={r.onLabelChange} onDelete={r.onDelete} onMoveUp={r.onMoveUp} onMoveDown={r.onMoveDown} dimmed={r.dimmed} />
+              custom={r.custom} onLabelChange={r.onLabelChange} onDelete={r.onDelete} dimmed={r.dimmed}
+              dragHandleProps={r.dragHandleProps} isDragging={r.isDragging} setRowRef={r.setRowRef} />
           ))}
         </div>
       </div>
@@ -1805,8 +1834,13 @@ function SheetCell({ value, onChange, bold, readOnly }) {
   );
 }
 
-function SheetRow({ label, arr, onChange, bold, highlight, indent, wizard }) {
+const SHEET_TOTAL_COL_WIDTH = 78;
+const SHEET_PCT_COL_WIDTH = 58;
+
+function SheetRow({ label, arr, onChange, bold, highlight, indent, wizard, showTotals, pctBase }) {
   const bg = highlight ? GOLD_SOFT : wizard ? SUMI_SOFT : CARD;
+  const total = arr.reduce((a, b) => a + b, 0);
+  const pct = pctBase ? (total / pctBase) * 100 : null;
   return (
     <div style={{ display: "flex", borderBottom: `1px solid ${PAPER_LINE}`, background: bg }}>
       <div style={{
@@ -1814,6 +1848,19 @@ function SheetRow({ label, arr, onChange, bold, highlight, indent, wizard }) {
         padding: "6px 8px 6px " + (indent ? "18px" : "8px"), position: "sticky", left: 0, zIndex: 2,
         background: bg, borderRight: `1px solid ${PAPER_LINE}`, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
       }}>{label}{wizard && <span title="費用ウィザードで設定" style={{ marginLeft: 4 }}>🧮</span>}</div>
+      {showTotals && (
+        <>
+          <div style={{
+            width: SHEET_TOTAL_COL_WIDTH, flexShrink: 0, boxSizing: "border-box", textAlign: "right", padding: "6px 7px", fontSize: 11,
+            fontWeight: bold ? 700 : 400, fontVariantNumeric: "tabular-nums", color: total < 0 ? SEAL : INK,
+            background: bg, borderRight: `1px solid ${PAPER_LINE}`, whiteSpace: "nowrap", overflow: "hidden",
+          }}>{fmt(total)}</div>
+          <div style={{
+            width: SHEET_PCT_COL_WIDTH, flexShrink: 0, boxSizing: "border-box", textAlign: "right", padding: "6px 7px", fontSize: 11,
+            fontWeight: bold ? 700 : 400, color: INK_SOFT, background: bg, borderRight: `1px solid ${PAPER_LINE}`, whiteSpace: "nowrap", overflow: "hidden",
+          }}>{pct != null ? pct.toFixed(1) + "%" : "―"}</div>
+        </>
+      )}
       <div style={{ display: "flex" }}>
         {YEARS.map((y, i) => (
           <SheetCell key={y} value={arr[i]} onChange={onChange ? (v) => onChange(i, v) : undefined} bold={bold} readOnly={!onChange} />
@@ -1823,7 +1870,7 @@ function SheetRow({ label, arr, onChange, bold, highlight, indent, wizard }) {
   );
 }
 
-function SheetYearHeader() {
+function SheetYearHeader({ showTotals }) {
   return (
     <div style={{ display: "flex", position: "sticky", top: 0, zIndex: 3, background: INK }}>
       <div style={{
@@ -1831,6 +1878,18 @@ function SheetYearHeader() {
         display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center",
         color: UNIT_LABEL_COLOR, fontSize: 10.5, fontWeight: 700, padding: "2px 2px", lineHeight: 1.2,
       }}>単位：万円</div>
+      {showTotals && (
+        <>
+          <div style={{
+            width: SHEET_TOTAL_COL_WIDTH, flexShrink: 0, boxSizing: "border-box", textAlign: "center", color: PAPER, fontSize: 11,
+            fontWeight: 700, padding: "5px 0", borderRight: "1px solid #3A4C6B",
+          }}>合計</div>
+          <div style={{
+            width: SHEET_PCT_COL_WIDTH, flexShrink: 0, boxSizing: "border-box", textAlign: "center", color: PAPER, fontSize: 11,
+            fontWeight: 700, padding: "5px 0", borderRight: "1px solid #3A4C6B",
+          }}>割合</div>
+        </>
+      )}
       {YEARS.map((y) => (
         <div key={y} style={{ width: 82, flexShrink: 0, textAlign: "center", color: PAPER, fontSize: 11, padding: "5px 0", borderRight: "1px solid #3A4C6B" }}>
           {y}
@@ -1852,7 +1911,7 @@ function SheetSectionLabel({ text }) {
   );
 }
 
-function SheetAgeMemoRow({ member, onMemoChange }) {
+function SheetAgeMemoRow({ member, onMemoChange, showTotals }) {
   const by = member.birthYear;
   return (
     <div style={{ display: "flex", borderBottom: `1px solid ${PAPER_LINE}`, background: CARD }}>
@@ -1861,6 +1920,12 @@ function SheetAgeMemoRow({ member, onMemoChange }) {
         position: "sticky", left: 0, zIndex: 2, background: CARD, borderRight: `1px solid ${PAPER_LINE}`,
         whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
       }}>{member.label}</div>
+      {showTotals && (
+        <>
+          <div style={{ width: SHEET_TOTAL_COL_WIDTH, flexShrink: 0, boxSizing: "border-box", background: CARD, borderRight: `1px solid ${PAPER_LINE}` }} />
+          <div style={{ width: SHEET_PCT_COL_WIDTH, flexShrink: 0, boxSizing: "border-box", background: CARD, borderRight: `1px solid ${PAPER_LINE}` }} />
+        </>
+      )}
       <div style={{ display: "flex" }}>
         {YEARS.map((y) => {
           const age = by != null ? y - by : null;
@@ -1881,11 +1946,18 @@ function SheetAgeMemoRow({ member, onMemoChange }) {
 }
 
 
-function SheetTab({ sim, setSim, params, setParams, family, setFamily }) {
+function SheetTab({ sim, setSim, params, setParams, family, setFamily, recordHistory, undo, redo, canUndo, canRedo }) {
   const model = useMemo(() => computeModel(sim, params), [sim, params]);
   const exp = sim.expense, inc = sim.income;
+  const [showTotals, setShowTotals] = useState(false);
+  const bucketTotals = useMemo(() => ({
+    expense: model.expenseTotal.reduce((a, b) => a + b, 0),
+    income: model.incomeTotal.reduce((a, b) => a + b, 0),
+    asset: model.assetTotal.reduce((a, b) => a + b, 0),
+  }), [model]);
 
   const mk = (path) => (i, v) => {
+    recordHistory();
     setSim((prev) => {
       const next = clone(prev);
       let obj = next.expense;
@@ -1899,6 +1971,7 @@ function SheetTab({ sim, setSim, params, setParams, family, setFamily }) {
     });
   };
   const mkInc = (key) => (i, v) => {
+    recordHistory();
     setSim((prev) => { const next = clone(prev); fillForward(next.income[key], i, v); return next; });
   };
 
@@ -1935,13 +2008,22 @@ function SheetTab({ sim, setSim, params, setParams, family, setFamily }) {
           @page { size: A3 landscape; margin: 10mm; }
         }
       `}</style>
-      <div style={{ padding: "0 16px 4px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <SectionHeader title="全体シート" sub="元のスプレッドシートのように、全項目を一枚で見渡せます（数値は直接編集できます）" />
-        <button onClick={() => window.print()} style={{
-          fontSize: 11.5, padding: "7px 12px", borderRadius: 5, border: "none", background: GOLD, color: "#fff",
-          cursor: "pointer", whiteSpace: "nowrap", marginTop: 12, flexShrink: 0,
-        }}>🖨 PDFとして保存</button>
-      </div>
+      <SectionHeader title="全体シート" sub="元のスプレッドシートのように、全項目を一枚で見渡せます（数値は直接編集できます）"
+        rightSlot={
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <UndoRedoButtons onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo} />
+            <button onClick={() => setShowTotals((v) => !v)} style={{
+              fontSize: 11.5, padding: "7px 12px", borderRadius: 5, border: `1px solid ${GOLD}`,
+              background: showTotals ? GOLD : "transparent", color: showTotals ? "#fff" : GOLD,
+              cursor: "pointer", whiteSpace: "nowrap",
+            }}>{showTotals ? "▾ 合計・割合を隠す" : "▸ 合計・割合を表示"}</button>
+            <button onClick={() => window.print()} style={{
+              fontSize: 11.5, padding: "7px 12px", borderRadius: 5, border: "none", background: GOLD, color: "#fff",
+              cursor: "pointer", whiteSpace: "nowrap",
+            }}>🖨 PDFとして保存</button>
+          </div>
+        }
+      />
       <div className="sheet-print-target" style={{ padding: "0 16px 16px" }}>
         <div className="sheet-print-header" style={{ display: "none", marginBottom: 10 }}>
           <div style={{ fontFamily: "'Shippori Mincho','Noto Serif JP',serif", fontSize: 20, color: INK }}>ライフポートフォリオ</div>
@@ -1950,97 +2032,97 @@ function SheetTab({ sim, setSim, params, setParams, family, setFamily }) {
           </div>
         </div>
         <div className="sheet-scroll-container" style={{ overflow: "auto", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, maxHeight: "70vh" }}>
-          <div style={{ minWidth: 128 + N * 82 }}>
-            <SheetYearHeader />
+          <div style={{ minWidth: 128 + (showTotals ? SHEET_TOTAL_COL_WIDTH + SHEET_PCT_COL_WIDTH : 0) + N * 82 }}>
+            <SheetYearHeader showTotals={showTotals} />
 
             {membersWithAge.length > 0 && (
               <>
                 <SheetSectionLabel text="家族の年齢・メモ" />
                 {membersWithAge.map((m) => (
-                  <SheetAgeMemoRow key={m.id} member={m} onMemoChange={(year, text) => updateMemo(m.id, year, text)} />
+                  <SheetAgeMemoRow key={m.id} member={m} onMemoChange={(year, text) => updateMemo(m.id, year, text)} showTotals={showTotals} />
                 ))}
               </>
             )}
 
-            <SheetRow label="支出合計" arr={model.expenseTotal} bold highlight />
+            <SheetRow label="支出合計" arr={model.expenseTotal} bold highlight  showTotals={showTotals} pctBase={bucketTotals.expense} />
             <SheetSectionLabel text="学費" />
-            <SheetRow label={childLabel("child1", "子1")} arr={exp.tuition.child1} onChange={mk("tuition.child1")} indent wizard={isWizard("tuition.child1")} />
-            <SheetRow label="（習い事等）" arr={exp.tuition.child1_extra} onChange={mk("tuition.child1_extra")} indent />
-            <SheetRow label={childLabel("child2", "子2")} arr={exp.tuition.child2} onChange={mk("tuition.child2")} indent wizard={isWizard("tuition.child2")} />
-            <SheetRow label="（習い事等）" arr={exp.tuition.child2_extra} onChange={mk("tuition.child2_extra")} indent />
-            <SheetRow label={childLabel("child3", "子3")} arr={exp.tuition.child3} onChange={mk("tuition.child3")} indent wizard={isWizard("tuition.child3")} />
-            <SheetRow label="（習い事等）" arr={exp.tuition.child3_extra} onChange={mk("tuition.child3_extra")} indent />
-            <SheetRow label="子供下宿" arr={exp.dorm} onChange={mk("dorm")} indent />
+            <SheetRow label={childLabel("child1", "子1")} arr={exp.tuition.child1} onChange={mk("tuition.child1")} indent wizard={isWizard("tuition.child1")}  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            <SheetRow label="（習い事等）" arr={exp.tuition.child1_extra} onChange={mk("tuition.child1_extra")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            <SheetRow label={childLabel("child2", "子2")} arr={exp.tuition.child2} onChange={mk("tuition.child2")} indent wizard={isWizard("tuition.child2")}  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            <SheetRow label="（習い事等）" arr={exp.tuition.child2_extra} onChange={mk("tuition.child2_extra")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            <SheetRow label={childLabel("child3", "子3")} arr={exp.tuition.child3} onChange={mk("tuition.child3")} indent wizard={isWizard("tuition.child3")}  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            <SheetRow label="（習い事等）" arr={exp.tuition.child3_extra} onChange={mk("tuition.child3_extra")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            <SheetRow label="子供下宿" arr={exp.dorm} onChange={mk("dorm")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
 
             <SheetSectionLabel text="医療・介護" />
-            <SheetRow label={childLabel("father", "我々")} arr={exp.medical.us} onChange={mk("medical.us")} indent />
-            <SheetRow label={childLabel("gfather_p", "父方祖父")} arr={exp.medical.gfather_p} onChange={mk("medical.gfather_p")} indent />
-            <SheetRow label={childLabel("gmother_p", "父方祖母")} arr={exp.medical.gmother_p} onChange={mk("medical.gmother_p")} indent />
-            <SheetRow label={childLabel("gfather_m", "母方祖父")} arr={exp.medical.gfather_m} onChange={mk("medical.gfather_m")} indent />
-            <SheetRow label={childLabel("gmother_m", "母方祖母")} arr={exp.medical.gmother_m} onChange={mk("medical.gmother_m")} indent />
+            <SheetRow label={childLabel("father", "我々")} arr={exp.medical.us} onChange={mk("medical.us")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            <SheetRow label={childLabel("gfather_p", "父方祖父")} arr={exp.medical.gfather_p} onChange={mk("medical.gfather_p")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            <SheetRow label={childLabel("gmother_p", "父方祖母")} arr={exp.medical.gmother_p} onChange={mk("medical.gmother_p")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            <SheetRow label={childLabel("gfather_m", "母方祖父")} arr={exp.medical.gfather_m} onChange={mk("medical.gfather_m")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            <SheetRow label={childLabel("gmother_m", "母方祖母")} arr={exp.medical.gmother_m} onChange={mk("medical.gmother_m")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
 
             <SheetSectionLabel text={params.housingPlanEnabled ? "住宅（費用ウィザードのローン試算）" : `住宅（${HOUSING_LABELS[params.housingType]}）`} />
             {params.housingPlanEnabled ? (
               <>
-                <SheetRow label="住宅費（返済額＋その他）" arr={model.housingCost} indent />
-                <SheetRow label="ローン残高" arr={model.loanBalance} indent />
-                <SheetRow label="住宅資産（残存評価）" arr={model.realEstateAsset} indent />
+                <SheetRow label="住宅費（返済額＋その他）" arr={model.housingCost} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
+                <SheetRow label="ローン残高" arr={model.loanBalance} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
+                <SheetRow label="住宅資産（残存評価）" arr={model.realEstateAsset} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
                 <SheetRow label="ローン金利（年率%）" arr={model.housingRate.map((r) => Math.round(r * 10000) / 100)}
-                  onChange={(i, v) => setRateOverride(YEARS[i], v)} indent />
+                  onChange={(i, v) => setRateOverride(YEARS[i], v)} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
               </>
             ) : params.housingType === 1 ? (
               <>
-                <SheetRow label="ローン支払" arr={exp.housing_opt1_loanPayment} onChange={mk("housing_opt1_loanPayment")} indent />
-                <SheetRow label="ローン控除" arr={exp.housing_opt1_loanDeduction} onChange={mk("housing_opt1_loanDeduction")} indent />
-                <SheetRow label="固定資産税" arr={exp.housing_opt1_propertyTax} onChange={mk("housing_opt1_propertyTax")} indent />
-                <SheetRow label="保険" arr={exp.housing_opt1_insurance} onChange={mk("housing_opt1_insurance")} indent />
-                <SheetRow label="修繕費" arr={exp.housing_opt1_repair} onChange={mk("housing_opt1_repair")} indent />
-                <SheetRow label="ローン残高" arr={model.loanBalance} indent />
+                <SheetRow label="ローン支払" arr={exp.housing_opt1_loanPayment} onChange={mk("housing_opt1_loanPayment")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
+                <SheetRow label="ローン控除" arr={exp.housing_opt1_loanDeduction} onChange={mk("housing_opt1_loanDeduction")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
+                <SheetRow label="固定資産税" arr={exp.housing_opt1_propertyTax} onChange={mk("housing_opt1_propertyTax")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
+                <SheetRow label="保険" arr={exp.housing_opt1_insurance} onChange={mk("housing_opt1_insurance")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
+                <SheetRow label="修繕費" arr={exp.housing_opt1_repair} onChange={mk("housing_opt1_repair")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
+                <SheetRow label="ローン残高" arr={model.loanBalance} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
               </>
             ) : params.housingType === 2 ? (
-              <SheetRow label="賃貸→住替え" arr={exp.housing_opt2_rent_relocate} onChange={mk("housing_opt2_rent_relocate")} indent />
+              <SheetRow label="賃貸→住替え" arr={exp.housing_opt2_rent_relocate} onChange={mk("housing_opt2_rent_relocate")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
             ) : params.housingType === 3 ? (
-              <SheetRow label="分譲中古" arr={exp.housing_opt3_used_condo} onChange={mk("housing_opt3_used_condo")} indent />
+              <SheetRow label="分譲中古" arr={exp.housing_opt3_used_condo} onChange={mk("housing_opt3_used_condo")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
             ) : (
-              <SheetRow label="賃貸→分譲" arr={exp.housing_opt4_rent_to_condo} onChange={mk("housing_opt4_rent_to_condo")} indent />
+              <SheetRow label="賃貸→分譲" arr={exp.housing_opt4_rent_to_condo} onChange={mk("housing_opt4_rent_to_condo")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
             )}
 
             <SheetSectionLabel text="車" />
-            <SheetRow label="本体" arr={exp.car.body} onChange={mk("car.body")} indent wizard={isWizard("car.body")} />
-            <SheetRow label="駐車場" arr={exp.car.parking} onChange={mk("car.parking")} indent wizard={isWizard("car.parking")} />
-            <SheetRow label="ガス代" arr={exp.car.gas} onChange={mk("car.gas")} indent wizard={isWizard("car.gas")} />
-            <SheetRow label="保険" arr={exp.car.insurance} onChange={mk("car.insurance")} indent wizard={isWizard("car.insurance")} />
-            <SheetRow label="税金" arr={exp.car.tax} onChange={mk("car.tax")} indent wizard={isWizard("car.tax")} />
-            <SheetRow label="車検" arr={exp.car.inspection} onChange={mk("car.inspection")} indent wizard={isWizard("car.inspection")} />
-            <SheetRow label="他経費" arr={exp.car.other} onChange={mk("car.other")} indent wizard={isWizard("car.other")} />
+            <SheetRow label="本体" arr={exp.car.body} onChange={mk("car.body")} indent wizard={isWizard("car.body")}  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            <SheetRow label="駐車場" arr={exp.car.parking} onChange={mk("car.parking")} indent wizard={isWizard("car.parking")}  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            <SheetRow label="ガス代" arr={exp.car.gas} onChange={mk("car.gas")} indent wizard={isWizard("car.gas")}  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            <SheetRow label="保険" arr={exp.car.insurance} onChange={mk("car.insurance")} indent wizard={isWizard("car.insurance")}  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            <SheetRow label="税金" arr={exp.car.tax} onChange={mk("car.tax")} indent wizard={isWizard("car.tax")}  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            <SheetRow label="車検" arr={exp.car.inspection} onChange={mk("car.inspection")} indent wizard={isWizard("car.inspection")}  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            <SheetRow label="他経費" arr={exp.car.other} onChange={mk("car.other")} indent wizard={isWizard("car.other")}  showTotals={showTotals} pctBase={bucketTotals.expense} />
 
             <SheetSectionLabel text="他生活費" />
-            <SheetRow label="食費" arr={exp.living.food} onChange={mk("living.food")} indent />
-            <SheetRow label="光熱費" arr={exp.living.utilities} onChange={mk("living.utilities")} indent />
-            <SheetRow label="通信費" arr={exp.living.communication} onChange={mk("living.communication")} indent />
-            <SheetRow label="日用品・衣服" arr={exp.living.daily_goods} onChange={mk("living.daily_goods")} indent />
+            <SheetRow label="食費" arr={exp.living.food} onChange={mk("living.food")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            <SheetRow label="光熱費" arr={exp.living.utilities} onChange={mk("living.utilities")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            <SheetRow label="通信費" arr={exp.living.communication} onChange={mk("living.communication")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            <SheetRow label="日用品・衣服" arr={exp.living.daily_goods} onChange={mk("living.daily_goods")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
 
             <SheetSectionLabel text="その他支出" />
-            <SheetRow label="交際費" arr={exp.social} onChange={mk("social")} indent />
-            <SheetRow label="レジャー他" arr={exp.leisure} onChange={mk("leisure")} indent />
-            <SheetRow label="その他" arr={exp.other} onChange={mk("other")} indent />
-            <SheetRow label="突発" arr={exp.sudden} onChange={mk("sudden")} indent />
+            <SheetRow label="交際費" arr={exp.social} onChange={mk("social")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            <SheetRow label="レジャー他" arr={exp.leisure} onChange={mk("leisure")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            <SheetRow label="その他" arr={exp.other} onChange={mk("other")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            <SheetRow label="突発" arr={exp.sudden} onChange={mk("sudden")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
 
-            <SheetRow label="収入合計" arr={model.incomeTotal} bold highlight />
+            <SheetRow label="収入合計" arr={model.incomeTotal} bold highlight  showTotals={showTotals} pctBase={bucketTotals.income} />
             <SheetSectionLabel text="収入" />
-            <SheetRow label={childLabel("father", "父")} arr={inc.father} onChange={mkInc("father")} indent />
-            <SheetRow label={childLabel("mother", "母")} arr={inc.mother} onChange={mkInc("mother")} indent />
-            <SheetRow label="税還付金他" arr={inc.taxRefund} onChange={mkInc("taxRefund")} indent />
-            <SheetRow label="配当（自動計算）" arr={model.dividend} indent />
-            <SheetRow label="子供手当等" arr={inc.other_childAllowance} onChange={mkInc("other_childAllowance")} indent />
-            <SheetRow label="年金・退職金" arr={inc.pension_retirement} onChange={mkInc("pension_retirement")} indent />
+            <SheetRow label={childLabel("father", "父")} arr={inc.father} onChange={mkInc("father")} indent  showTotals={showTotals} pctBase={bucketTotals.income} />
+            <SheetRow label={childLabel("mother", "母")} arr={inc.mother} onChange={mkInc("mother")} indent  showTotals={showTotals} pctBase={bucketTotals.income} />
+            <SheetRow label="税還付金他" arr={inc.taxRefund} onChange={mkInc("taxRefund")} indent  showTotals={showTotals} pctBase={bucketTotals.income} />
+            <SheetRow label="配当（自動計算）" arr={model.dividend} indent  showTotals={showTotals} pctBase={bucketTotals.income} />
+            <SheetRow label="子供手当等" arr={inc.other_childAllowance} onChange={mkInc("other_childAllowance")} indent  showTotals={showTotals} pctBase={bucketTotals.income} />
+            <SheetRow label="年金・退職金" arr={inc.pension_retirement} onChange={mkInc("pension_retirement")} indent  showTotals={showTotals} pctBase={bucketTotals.income} />
 
-            <SheetRow label="収支" arr={model.balance} bold highlight />
+            <SheetRow label="収支" arr={model.balance} bold highlight  showTotals={showTotals} />
             <SheetSectionLabel text="資産推移（自動計算）" />
-            <SheetRow label="金融資産" arr={model.securities} indent />
-            <SheetRow label="現金" arr={model.cash} indent />
-            <SheetRow label="不動産" arr={model.realEstateAsset} indent />
-            <SheetRow label="総資産" arr={model.assetTotal} bold highlight />
+            <SheetRow label="金融資産" arr={model.securities} indent  showTotals={showTotals} pctBase={bucketTotals.asset} />
+            <SheetRow label="現金" arr={model.cash} indent  showTotals={showTotals} pctBase={bucketTotals.asset} />
+            <SheetRow label="不動産" arr={model.realEstateAsset} indent  showTotals={showTotals} pctBase={bucketTotals.asset} />
+            <SheetRow label="総資産" arr={model.assetTotal} bold highlight  showTotals={showTotals} pctBase={bucketTotals.asset} />
           </div>
         </div>
         <div style={{ fontSize: 10.5, color: INK_SOFT, marginTop: 8 }}>
@@ -2569,7 +2651,7 @@ function AssetChartTooltip({ active, payload, label }) {
   );
 }
 
-function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, holdings, onOpenWizard, onOpenSheet }) {
+function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, holdings, onOpenWizard, onOpenSheet, recordHistory, undo, redo, canUndo, canRedo }) {
   const model = useMemo(() => computeModel(sim, params), [sim, params]);
   const [activeMarker, setActiveMarker] = useState(null);
   const [showScenario, setShowScenario] = useState(false);
@@ -2592,39 +2674,8 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
       .map(([cat, w]) => ({ label: cat, arr: model.securities.map((v) => v * w) }));
   }, [classWeights, model.securities]);
 
-  // 支出／収入の内訳編集用の元に戻す・やり直す（最大5件、このタブでの編集のみが対象）
-  const [undoStack, setUndoStack] = useState([]);
-  const [redoStack, setRedoStack] = useState([]);
-  const recordHistory = () => {
-    setUndoStack((stack) => [...stack, clone(sim)].slice(-5));
-    setRedoStack([]);
-  };
-  const undo = () => {
-    if (undoStack.length === 0) return;
-    const prevSim = undoStack[undoStack.length - 1];
-    setRedoStack((r) => [...r, clone(sim)].slice(-5));
-    setUndoStack((stack) => stack.slice(0, -1));
-    setSim(prevSim);
-  };
-  const redo = () => {
-    if (redoStack.length === 0) return;
-    const nextSim = redoStack[redoStack.length - 1];
-    setUndoStack((stack) => [...stack, clone(sim)].slice(-5));
-    setRedoStack((r) => r.slice(0, -1));
-    setSim(nextSim);
-  };
-  const UndoRedoControls = () => (
-    <div style={{ display: "flex", gap: 4 }}>
-      <button onClick={undo} disabled={undoStack.length === 0} title="元に戻す" style={{
-        border: `1px solid ${PAPER_LINE}`, background: "#fff", borderRadius: 4, padding: "5px 8px",
-        fontSize: 13, cursor: undoStack.length === 0 ? "default" : "pointer", opacity: undoStack.length === 0 ? 0.35 : 1,
-      }}>↩️</button>
-      <button onClick={redo} disabled={redoStack.length === 0} title="やり直す" style={{
-        border: `1px solid ${PAPER_LINE}`, background: "#fff", borderRadius: 4, padding: "5px 8px",
-        fontSize: 13, cursor: redoStack.length === 0 ? "default" : "pointer", opacity: redoStack.length === 0 ? 0.35 : 1,
-      }}>↪️</button>
-    </div>
-  );
+  // 支出／収入の内訳編集用の元に戻す・やり直す（最大5件）は、全体シートと履歴を共有するためApp()側で管理している
+  const UndoRedoControls = () => <UndoRedoButtons onUndo={undo} onRedo={redo} canUndo={canUndo} canRedo={canRedo} />;
 
   const mk = (path) => (i, v) => {
     recordHistory();
@@ -2648,6 +2699,26 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
 
   // 各項目（学費・医療・車 等）ごとに自由に追加できるカスタム行
   const customRowsFor = (kind, sectionKey) => (kind === "income" ? sim.income.customRows : sim.expense.customRows?.[sectionKey]) || [];
+
+  // カスタム行の長押しドラッグでの並べ替え（項目ごとに独立した並び）
+  const makeCustomRowDrag = (kind, sectionKey) => useDragReorder((order, from, to) => {
+    recordHistory();
+    setSim((prev) => {
+      const next = clone(prev);
+      if (kind === "income") next.income.customRows = moveArrayItem(next.income.customRows || [], from, to);
+      else next.expense.customRows[sectionKey] = moveArrayItem(next.expense.customRows[sectionKey] || [], from, to);
+      return next;
+    });
+  });
+  const customRowDrags = {
+    tuition: makeCustomRowDrag("expense", "tuition"),
+    medical: makeCustomRowDrag("expense", "medical"),
+    housing: makeCustomRowDrag("expense", "housing"),
+    car: makeCustomRowDrag("expense", "car"),
+    living: makeCustomRowDrag("expense", "living"),
+    social: makeCustomRowDrag("expense", "social"),
+    income: makeCustomRowDrag("income", null),
+  };
   const addCustomRow = (kind, sectionKey) => {
     recordHistory();
     setSim((prev) => {
@@ -2690,31 +2761,26 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
       return next;
     });
   };
-  const moveCustomRow = (kind, sectionKey, id, dir) => () => {
-    recordHistory();
-    setSim((prev) => {
-      const next = clone(prev);
-      const list = kind === "income" ? next.income.customRows : next.expense.customRows?.[sectionKey];
-      if (!list) return prev;
-      const idx = list.findIndex((r) => r.id === id);
-      const swapIdx = dir === "up" ? idx - 1 : idx + 1;
-      if (idx === -1 || swapIdx < 0 || swapIdx >= list.length) return prev;
-      [list[idx], list[swapIdx]] = [list[swapIdx], list[idx]];
-      return next;
-    });
-  };
   // 学費・医療・車・他生活費・交際費等・収入の各セクションに、カスタム行の編集用の行データと
   // 「＋ 行を追加」ボタンを付け足す
   const customRowsBlock = (kind, sectionKey) => {
     const rows = customRowsFor(kind, sectionKey);
+    const drag = customRowDrags[kind === "income" ? "income" : sectionKey];
+    const order = rows.map((r) => r.id);
+    const renderOrder = drag.getRenderOrder(order);
+    const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
     return {
-      rows: rows.map((r, i) => ({
-        id: r.id, label: r.label, arr: r.arr, onChange: updateCustomRowValue(kind, sectionKey, r.id),
-        custom: true, onLabelChange: renameCustomRow(kind, sectionKey, r.id),
-        onDelete: deleteCustomRow(kind, sectionKey, r.id, r.label),
-        onMoveUp: i > 0 ? moveCustomRow(kind, sectionKey, r.id, "up") : null,
-        onMoveDown: i < rows.length - 1 ? moveCustomRow(kind, sectionKey, r.id, "down") : null,
-      })),
+      rows: renderOrder.map((id) => {
+        const r = byId[id];
+        return {
+          id: r.id, label: r.label, arr: r.arr, onChange: updateCustomRowValue(kind, sectionKey, r.id),
+          custom: true, onLabelChange: renameCustomRow(kind, sectionKey, r.id),
+          onDelete: deleteCustomRow(kind, sectionKey, r.id, r.label),
+          dragHandleProps: drag.bindHandle(r.id, order),
+          isDragging: drag.dragKey === r.id,
+          setRowRef: drag.setItemRef(r.id),
+        };
+      }),
       addButton: (
         <button onClick={() => addCustomRow(kind, sectionKey)} style={{
           marginTop: 6, fontSize: 11, padding: "5px 10px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`,
@@ -2918,7 +2984,7 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
         </Accordion>
       </div>
 
-      <SectionHeader title="資産額（試算）" sub="現在の保有比率に、金融資産の年間成長率を当てはめた推計です" />
+      <SectionHeader title="資産額" sub="現在の保有比率に、金融資産の年間成長率を当てはめた推計です" />
       <div style={{ padding: "0 16px 8px" }}>
         <Accordion title="資産額" colorKey="tuition">
           <EditTable rows={[
@@ -3975,6 +4041,38 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
   const totalCost = holdings.reduce((s, h) => s + (h.avgJpyTotal || 0), 0);
   const totalPl = holdings.reduce((s, h) => s + ((h.valueJpy || 0) - (h.avgJpyTotal || 0)), 0);
 
+  // 保有銘柄・現金・シミュレーション転記の編集用の元に戻す・やり直す
+  // （最大5件、このタブでの編集のみが対象。価格の自動取得・シミュレーションへの転記も含む）
+  const [undoStack, setUndoStack] = useState([]);
+  const [redoStack, setRedoStack] = useState([]);
+  const snapshotState = () => ({
+    holdings: clone(holdings), cashList: clone(cashList),
+    securitiesActualOverrides: clone(params.securitiesActualOverrides || {}),
+  });
+  const applySnapshot = (snap) => {
+    setHoldings(snap.holdings);
+    setCashList(snap.cashList);
+    setParams((p) => ({ ...p, securitiesActualOverrides: snap.securitiesActualOverrides }));
+  };
+  const recordHistory = () => {
+    setUndoStack((stack) => [...stack, snapshotState()].slice(-5));
+    setRedoStack([]);
+  };
+  const undo = () => {
+    if (undoStack.length === 0) return;
+    const prev = undoStack[undoStack.length - 1];
+    setRedoStack((r) => [...r, snapshotState()].slice(-5));
+    setUndoStack((stack) => stack.slice(0, -1));
+    applySnapshot(prev);
+  };
+  const redo = () => {
+    if (redoStack.length === 0) return;
+    const next = redoStack[redoStack.length - 1];
+    setUndoStack((stack) => [...stack, snapshotState()].slice(-5));
+    setRedoStack((r) => r.slice(0, -1));
+    applySnapshot(next);
+  };
+
   // シミュレーションへの転記（現金以外の保有資産の合計を、指定年の金融資産としてシミュレーションに書き込む）
   const simModel = useMemo(() => computeModel(sim, params), [sim, params]);
   const anchorYear = parseInt((asOfDate || "").slice(0, 4), 10) || new Date().getFullYear();
@@ -3987,34 +4085,11 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
     if (!transcribeInRange) return;
     const ok = window.confirm(`${transcribeYear}年の金融資産（現金以外の保有資産合計）をシミュレーションに転記します。\n${fmt(transcribeBeforeMan)} → ${fmt(nonCashTotalMan)} 万円\n\nよろしいですか？`);
     if (!ok) return;
+    recordHistory();
     setParams((p) => ({
       ...p,
       securitiesActualOverrides: { ...(p.securitiesActualOverrides || {}), [transcribeYear]: nonCashTotalMan },
     }));
-  };
-
-  // 保有銘柄・現金の編集用の元に戻す・やり直す（最大5件、このタブでの編集のみが対象。価格の自動取得も含む）
-  const [undoStack, setUndoStack] = useState([]);
-  const [redoStack, setRedoStack] = useState([]);
-  const recordHistory = () => {
-    setUndoStack((stack) => [...stack, { holdings: clone(holdings), cashList: clone(cashList) }].slice(-5));
-    setRedoStack([]);
-  };
-  const undo = () => {
-    if (undoStack.length === 0) return;
-    const prev = undoStack[undoStack.length - 1];
-    setRedoStack((r) => [...r, { holdings: clone(holdings), cashList: clone(cashList) }].slice(-5));
-    setUndoStack((stack) => stack.slice(0, -1));
-    setHoldings(prev.holdings);
-    setCashList(prev.cashList);
-  };
-  const redo = () => {
-    if (redoStack.length === 0) return;
-    const next = redoStack[redoStack.length - 1];
-    setUndoStack((stack) => [...stack, { holdings: clone(holdings), cashList: clone(cashList) }].slice(-5));
-    setRedoStack((r) => r.slice(0, -1));
-    setHoldings(next.holdings);
-    setCashList(next.cashList);
   };
 
   const [displayCurrency, setDisplayCurrency] = useState("JPY");
@@ -4282,32 +4357,6 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
         </div>
       </div>
 
-      <div style={{ padding: "0 16px 14px" }}>
-        <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 12 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: INK, marginBottom: 6 }}>シミュレーションに転記</div>
-          <div style={{ fontSize: 11, color: INK_SOFT, marginBottom: 8 }}>
-            現金を除く保有資産の合計額を、指定した年の金融資産としてシミュレーションに書き込みます。その年以降は、この金額を起点に成長率などで再計算されます。
-          </div>
-          <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-            対象年
-            <input type="number" value={transcribeYear} onChange={(e) => setTranscribeYear(parseInt(e.target.value, 10) || transcribeYear)}
-              style={{ width: 80, padding: "5px 7px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4 }} />
-          </label>
-          {!transcribeInRange ? (
-            <div style={{ fontSize: 11.5, color: SEAL }}>{transcribeYear}年はシミュレーションの期間（{YEARS[0]}〜{YEARS[N - 1]}年）の外なので転記できません。</div>
-          ) : (
-            <>
-              <div style={{ fontSize: 11, color: INK_SOFT, marginBottom: 8 }}>
-                金融資産（現金以外の保有資産合計）：{fmt(transcribeBeforeMan)} → {fmt(nonCashTotalMan)} 万円
-              </div>
-              <button onClick={postToSimulation} style={{
-                fontSize: 12, padding: "8px 14px", borderRadius: 4, border: "none", background: GOLD, color: "#fff", cursor: "pointer",
-              }}>{transcribeYear}年の金融資産として転記する</button>
-            </>
-          )}
-        </div>
-      </div>
-
       <div style={{ padding: "0 16px" }}>
         <div ref={cashSectionRef}>
           {cashLink && cashLink.cashIdx === null && (
@@ -4383,6 +4432,35 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
             </Accordion>
           );
         })}
+      </div>
+
+      <div style={{ padding: "16px 16px 0" }}>
+        <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 12 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: INK, marginBottom: 6 }}>シミュレーションに転記</div>
+          <div style={{ fontSize: 11, color: INK_SOFT, marginBottom: 8 }}>
+            現金を除く保有資産の合計額を、指定した年の金融資産としてシミュレーションに書き込みます。その年以降は、この金額を起点に成長率などで再計算されます。
+          </div>
+          <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+            対象年
+            <input type="number" value={transcribeYear} onChange={(e) => setTranscribeYear(parseInt(e.target.value, 10) || transcribeYear)}
+              style={{ width: 80, padding: "5px 7px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4 }} />
+          </label>
+          {!transcribeInRange ? (
+            <div style={{ fontSize: 11.5, color: SEAL }}>{transcribeYear}年はシミュレーションの期間（{YEARS[0]}〜{YEARS[N - 1]}年）の外なので転記できません。</div>
+          ) : (
+            <>
+              <div style={{ fontSize: 11, color: INK_SOFT, marginBottom: 8 }}>
+                金融資産（現金以外の保有資産合計）：{fmt(transcribeBeforeMan)} → {fmt(nonCashTotalMan)} 万円
+              </div>
+              <button onClick={postToSimulation} style={{
+                fontSize: 12, padding: "8px 14px", borderRadius: 4, border: "none", background: GOLD, color: "#fff", cursor: "pointer",
+              }}>{transcribeYear}年の金融資産として転記する</button>
+            </>
+          )}
+          <div style={{ fontSize: 10, color: INK_SOFT, marginTop: 8 }}>
+            この操作は、上の↩️（元に戻す）ボタンでやり直せます。
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -5131,6 +5209,29 @@ const STORAGE_KEY = "kakeibo_sim_state_v1";
 export default function App() {
   const [tab, setTab] = useState("sim");
   const [sim, setSim] = useState(defaultSimState);
+
+  // シミュレーション（sim）編集用の元に戻す・やり直す（最大5件）。
+  // 「シミュレーション」タブと「全体シート」の両方で同じ履歴を共有する
+  const [simUndoStack, setSimUndoStack] = useState([]);
+  const [simRedoStack, setSimRedoStack] = useState([]);
+  const recordSimHistory = () => {
+    setSimUndoStack((stack) => [...stack, clone(sim)].slice(-5));
+    setSimRedoStack([]);
+  };
+  const undoSim = () => {
+    if (simUndoStack.length === 0) return;
+    const prevSim = simUndoStack[simUndoStack.length - 1];
+    setSimRedoStack((r) => [...r, clone(sim)].slice(-5));
+    setSimUndoStack((stack) => stack.slice(0, -1));
+    setSim(prevSim);
+  };
+  const redoSim = () => {
+    if (simRedoStack.length === 0) return;
+    const nextSim = simRedoStack[simRedoStack.length - 1];
+    setSimUndoStack((stack) => [...stack, clone(sim)].slice(-5));
+    setSimRedoStack((r) => r.slice(0, -1));
+    setSim(nextSim);
+  };
   const [params, setParams] = useState(defaultParamsState);
   const [holdings, setHoldings] = useState(defaultPortfolioState);
   const [cashList, setCashList] = useState(defaultCashState);
@@ -5343,7 +5444,8 @@ export default function App() {
         onChange={setTab}
       />
 
-      {tab === "sim" && <SimulationTab sim={sim} setSim={setSim} params={params} setParams={setParams} scenario={scenario} setScenario={setScenario} holdings={holdings} onOpenWizard={openCostWizard} onOpenSheet={() => setShowSheet(true)} />}
+      {tab === "sim" && <SimulationTab sim={sim} setSim={setSim} params={params} setParams={setParams} scenario={scenario} setScenario={setScenario} holdings={holdings} onOpenWizard={openCostWizard} onOpenSheet={() => setShowSheet(true)}
+        recordHistory={recordSimHistory} undo={undoSim} redo={redoSim} canUndo={simUndoStack.length > 0} canRedo={simRedoStack.length > 0} />}
       {tab === "portfolio" && <PortfolioTab holdings={holdings} setHoldings={setHoldings} cashList={cashList} setCashList={setCashList} params={params} setParams={setParams} sim={sim} asOfDate={asOfDate} setAsOfDate={setAsOfDate} assetClassList={assetClassList} setAssetClassList={setAssetClassList} subclassSuggestions={subclassSuggestions} setSubclassSuggestions={setSubclassSuggestions} />}
       {tab === "aggregate" && <AggregationTab holdings={holdings} cashList={cashList} sim={sim} params={params} setParams={setParams} asOfDate={asOfDate} portfolioLogs={portfolioLogs} setPortfolioLogs={setPortfolioLogs} />}
       {showSheet && (
@@ -5352,7 +5454,8 @@ export default function App() {
             <div style={{ fontFamily: "'Shippori Mincho','Noto Serif JP',serif", fontSize: 17 }}>一覧</div>
             <button onClick={() => setShowSheet(false)} style={{ background: "transparent", border: "1px solid #4A5A75", color: PAPER, borderRadius: 4, padding: "5px 10px", fontSize: 12, cursor: "pointer" }}>閉じる ×</button>
           </div>
-          <SheetTab sim={sim} setSim={setSim} params={params} setParams={setParams} family={family} setFamily={setFamily} />
+          <SheetTab sim={sim} setSim={setSim} params={params} setParams={setParams} family={family} setFamily={setFamily}
+            recordHistory={recordSimHistory} undo={undoSim} redo={redoSim} canUndo={simUndoStack.length > 0} canRedo={simRedoStack.length > 0} />
         </div>
       )}
     </div>
