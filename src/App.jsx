@@ -264,7 +264,9 @@ function migrateUnitScaleV1(sim, params) {
 // 同じマイグレーション処理を通すための共通ヘルパー
 function migrateLoadedState(parsed) {
   const loadedSim = parsed.sim ? migrateSimFoodFields({ wizardTouched: [], ...parsed.sim }) : null;
-  const loadedParams = parsed.params ? { ...defaultParamsState(), ...parsed.params } : null;
+  const loadedParams = parsed.params
+    ? { ...defaultParamsState(), ...parsed.params, fxRates: parsed.params.fxRates || { USD: parsed.params.fxRate || 150 } }
+    : null;
   let fixedSim = loadedSim, fixedParams = loadedParams;
   if (loadedSim || loadedParams) {
     const r = migrateUnitScaleV1(loadedSim || defaultSimState(), loadedParams || defaultParamsState());
@@ -274,7 +276,7 @@ function migrateLoadedState(parsed) {
   return {
     sim: fixedSim,
     params: fixedParams,
-    holdings: parsed.holdings ? migrateHoldingFields(parsed.holdings) : null,
+    holdings: parsed.holdings ? migrateCurrencyFields(migrateHoldingFields(parsed.holdings)) : null,
     cashList: parsed.cashList ? migrateCashIds(parsed.cashList) : null,
     portfolioLogs: parsed.portfolioLogs || null,
     assetClassList: parsed.assetClassList || null,
@@ -333,7 +335,46 @@ function migrateHoldingFields(holdings) {
   });
 }
 
-function defaultPortfolioState() { return migrateHoldingFields(clone(RAW.portfolio.holdings)); }
+// 通貨建て（円建・ドル建の2択だった）を汎用の通貨コードに一般化する移行処理。
+// 投信以外の単価は priceUsdUnit/priceJpyUnit の使い分けをやめ、h.currency建ての
+// priceUnit 1本にまとめる（投信は常に円建の基準価額なので priceJpyUnit のまま）
+function migrateCurrencyFields(holdings) {
+  if (!Array.isArray(holdings)) return holdings;
+  return holdings.map((h) => {
+    let currency = h.currency;
+    if (currency === "ドル建") currency = "USD";
+    else if (currency === "円建") currency = "JPY";
+    else if (!currency) currency = "JPY";
+    const isFund = h.qtyMode === "nav10000";
+    if (isFund) {
+      if (h.priceUsdUnit === undefined && currency === h.currency) return h;
+      const { priceUsdUnit, ...rest } = h;
+      return { ...rest, currency };
+    }
+    if (h.priceUnit !== undefined && currency === h.currency) return h;
+    const priceUnit = h.priceUnit !== undefined ? h.priceUnit : (h.priceUsdUnit ?? h.priceJpyUnit ?? null);
+    const { priceUsdUnit, priceJpyUnit, ...rest } = h;
+    return { ...rest, currency, priceUnit };
+  });
+}
+
+const CURRENCIES = [
+  { code: "JPY", label: "円", symbol: "¥" },
+  { code: "USD", label: "米ドル", symbol: "$" },
+  { code: "EUR", label: "ユーロ", symbol: "€" },
+  { code: "GBP", label: "英ポンド", symbol: "£" },
+  { code: "AUD", label: "豪ドル", symbol: "A$" },
+  { code: "CAD", label: "加ドル", symbol: "C$" },
+  { code: "CHF", label: "スイスフラン", symbol: "Fr" },
+  { code: "CNY", label: "人民元", symbol: "¥" },
+  { code: "HKD", label: "香港ドル", symbol: "HK$" },
+];
+const DEFAULT_FX_RATES = { USD: 150, EUR: 160, GBP: 190, AUD: 100, CAD: 110, CHF: 170, CNY: 21, HKD: 19 };
+function currencySymbolFor(code) { return CURRENCIES.find((c) => c.code === code)?.symbol || code; }
+// JPY建てなら常に1、それ以外は現在の設定レート（未設定ならおおよその目安値）を返す
+function fxRateFor(fxRates, code) { return (!code || code === "JPY") ? 1 : ((fxRates && fxRates[code]) ?? DEFAULT_FX_RATES[code] ?? 150); }
+
+function defaultPortfolioState() { return migrateCurrencyFields(migrateHoldingFields(clone(RAW.portfolio.holdings))); }
 
 // 現金口座を保有銘柄から安定して参照できるよう、行の並べ替えに影響されないIDを付与する
 function genCashId() { return `cash_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`; }
@@ -431,6 +472,7 @@ function defaultParamsState() {
     securities0: RAW.init.securities0,
     cash0: RAW.init.cash0,
     fxRate: RAW.portfolio.usdjpy || 150,
+    fxRates: { USD: RAW.portfolio.usdjpy || 150 },
     simStartYear: RAW.sim.years[0],
     wageGrowthRate: 0,
     downPayment: 0,
@@ -520,24 +562,29 @@ function chunk(arr, size) {
    指定日時点での保有銘柄の価格を取得する共通ロジック
    （ポートフォリオタブ／資産集計タブの両方から利用）
    ============================================================ */
-async function fetchPricesAsOf(dateStr, holdings, fallbackFx, onStatus) {
+async function fetchPricesAsOf(dateStr, holdings, fallbackFxRates, onStatus) {
   if (!PRICE_API_BASE) {
     throw new Error("価格取得サーバーが設定されていません。しばらくお待ちいただくか、今は手入力をご利用ください。");
   }
   const todayStr = new Date().toISOString().slice(0, 10);
   const isHistorical = dateStr !== todayStr;
-  let fxRate = fallbackFx;
-
-  onStatus?.(isHistorical ? `${dateStr}時点の為替レートを取得中…` : "現在の為替レートを取得中…");
-  try {
-    const fxUrl = `${PRICE_API_BASE}/fx${isHistorical ? `?date=${dateStr}` : ""}`;
-    const fx = await fetchJson(fxUrl);
-    if (fx && typeof fx.usdjpy === "number") fxRate = fx.usdjpy;
-  } catch (e) { /* keep fallback fx */ }
 
   const targets = holdings
     .map((h, idx) => ({ ...h, idx, symbol: yfSymbolFor(h) }))
     .filter((h) => h.symbol);
+
+  // 保有銘柄が実際に使っている通貨（円以外）の分だけレートを取得する
+  const neededCurrencies = [...new Set(targets.map((h) => h.currency).filter((c) => c && c !== "JPY"))];
+  let fxRates = { ...(fallbackFxRates || {}) };
+  if (neededCurrencies.length > 0) {
+    onStatus?.(isHistorical ? `${dateStr}時点の為替レートを取得中…` : "現在の為替レートを取得中…");
+    try {
+      const fxUrl = `${PRICE_API_BASE}/fx?currencies=${neededCurrencies.join(",")}${isHistorical ? `&date=${dateStr}` : ""}`;
+      const fx = await fetchJson(fxUrl);
+      if (fx?.rates) fxRates = { ...fxRates, ...fx.rates };
+    } catch (e) { /* keep fallback rates */ }
+  }
+
   const batches = chunk(targets, 20);
   const valueMap = {};
   let updated = 0, failed = 0;
@@ -554,15 +601,16 @@ async function fetchPricesAsOf(dateStr, holdings, fallbackFx, onStatus) {
       batch.forEach((h) => {
         const r = bySymbol[h.symbol];
         if (!r || typeof r.price !== "number") { failed++; return; }
-        const valueJpy = r.currency === "USD" ? h.qty * r.price * fxRate : h.qty * r.price;
-        valueMap[h.idx] = { valueJpy, price: r.price, currency: r.currency, asOf: r.asOf || dateStr };
+        const rate = fxRateFor(fxRates, h.currency);
+        const valueJpy = h.currency === "JPY" ? h.qty * r.price : h.qty * r.price * rate;
+        valueMap[h.idx] = { valueJpy, price: r.price, currency: h.currency, asOf: r.asOf || dateStr };
         updated++;
       });
     } catch (e) {
       failed += batch.length;
     }
   }
-  return { fxRate, valueMap, updated, failed };
+  return { fxRates, valueMap, updated, failed };
 }
 
 // 日本の銘柄（.T）のうち、まだ日本語名称が未取得のものだけ取得する
@@ -3129,7 +3177,7 @@ function SubClassField({ assetCat, value, onChange, suggestions }) {
   );
 }
 
-function AddHoldingForm({ onAdd, fxRate, cashList, pendingAccountId, onRequestAccountPick, onClearAccountId, assetClassList, subclassSuggestions, onOpenClassManager }) {
+function AddHoldingForm({ onAdd, fxRates, cashList, pendingAccountId, onRequestAccountPick, onClearAccountId, assetClassList, subclassSuggestions, onOpenClassManager }) {
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [candidates, setCandidates] = useState(null);
@@ -3214,21 +3262,21 @@ function AddHoldingForm({ onAdd, fxRate, cashList, pendingAccountId, onRequestAc
     const isFund = isFundPicked;
     const qty = parseFloat(qtyInput) || 0;
     const unitPrice = parseFloat(priceInput) || 0;
-    const fx = picked.currency === "USD" ? (fxRate || 150) : 1;
+    const fx = fxRateFor(fxRates, picked.currency);
     // 取得額合計は「数量（または口数）× 取得単価」から自動算出
     const avgJpyTotal = isFund ? (qty / 10000) * unitPrice : qty * unitPrice * fx;
     const newHolding = {
       linkedCashId: pendingAccountId || null, exchange: picked.exchange || "", ticker: picked.ticker || "",
       name: picked.name, qty: isFund ? 1 : qty,
       avgJpyTotal,
-      priceUsdUnit: picked.currency === "USD" && !isFund ? unitPrice : null,
-      priceJpyUnit: (picked.currency === "JPY" || isFund) ? unitPrice : null,
+      priceUnit: !isFund ? unitPrice : null,
+      priceJpyUnit: isFund ? unitPrice : null,
       valueJpy: avgJpyTotal, // 追加時点では取得単価＝評価額として初期化（後で価格取得により更新される）
       assetCat: picked.assetCat || "その他",
       subClass: picked.subClass || null,
       tags: picked.tags && picked.tags.length ? picked.tags : (picked.exchange ? ["個別銘柄"] : ["投信"]),
       memo: picked.memo || "",
-      currency: picked.currency === "USD" ? "ドル建" : "円建",
+      currency: isFund ? "JPY" : (picked.currency || "JPY"),
       autoFetchable: true,
       searchLabel: isFund ? picked.name : `${picked.exchange}:${picked.ticker}`,
       qtyMode: isFund ? "nav10000" : "shares",
@@ -3327,8 +3375,7 @@ function AddHoldingForm({ onAdd, fxRate, cashList, pendingAccountId, onRequestAc
                 <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 3 }}>
                   通貨
                   <select value={picked.currency} onChange={(e) => setPicked((p) => ({ ...p, currency: e.target.value }))} style={selectStyle}>
-                    <option value="JPY">JPY（円建）</option>
-                    <option value="USD">USD（ドル建）</option>
+                    {CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.code}（{c.label}）</option>)}
                   </select>
                 </label>
               </div>
@@ -3363,7 +3410,7 @@ function AddHoldingForm({ onAdd, fxRate, cashList, pendingAccountId, onRequestAc
                     style={{ width: 100, padding: "4px 6px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3 }} />
                 </label>
                 <label style={{ fontSize: 11.5, display: "flex", flexDirection: "column", gap: 3 }}>
-                  取得単価{isFundPicked ? "（1万口あたり・円）" : `（${picked.currency === "USD" ? "$" : "¥"}）`}
+                  取得単価{isFundPicked ? "（1万口あたり・円）" : `（${currencySymbolFor(picked.currency)}）`}
                   <CommaNumberInput value={priceInput} onChange={(v) => setPriceInput(v === null ? "" : String(v))}
                     placeholder={priceFetching ? "取得中…" : ""}
                     style={{ width: 120, padding: "4px 6px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3 }} />
@@ -3371,7 +3418,7 @@ function AddHoldingForm({ onAdd, fxRate, cashList, pendingAccountId, onRequestAc
               </div>
               {priceNote && <div style={{ fontSize: 10, color: INK_SOFT, marginTop: 6 }}>{priceNote}</div>}
               <div style={{ fontSize: 11, color: INK_SOFT, marginTop: 6 }}>
-                取得額合計：{fmtYen(isFundPicked ? ((parseFloat(qtyInput) || 0) / 10000) * (parseFloat(priceInput) || 0) : (parseFloat(qtyInput) || 0) * (parseFloat(priceInput) || 0) * (picked.currency === "USD" ? (fxRate || 150) : 1))}
+                取得額合計：{fmtYen(isFundPicked ? ((parseFloat(qtyInput) || 0) / 10000) * (parseFloat(priceInput) || 0) : (parseFloat(qtyInput) || 0) * (parseFloat(priceInput) || 0) * fxRateFor(fxRates, picked.currency))}
               </div>
 
               <div style={{ fontSize: 10.5, color: INK_SOFT, marginTop: 8, marginBottom: 4 }}>口座（任意）</div>
@@ -3414,14 +3461,14 @@ function assetCatColorKey(cat) {
   return { "株式": "tuition", "債権": "car", "コモディティ": "housing", "仮想通貨": "social", "不動産": "medical" }[cat] || "other";
 }
 
-function TradeForm({ kind, idx, h, fxRate, cashList, cashLink, onRequestCashPick, onApplyWithCash, onCancel }) {
+function TradeForm({ kind, idx, h, fxRates, cashList, cashLink, onRequestCashPick, onApplyWithCash, onCancel }) {
   const isFund = h.qtyMode === "nav10000";
   const currentQty = isFund ? (h.unitsImplied || 0) : (h.qty || 0);
   const [qtyInput, setQtyInput] = useState("");
   const [priceInput, setPriceInput] = useState("");
   const linkedCashIdx = h.linkedCashId ? cashList.findIndex((c) => c.id === h.linkedCashId) : -1;
   const [reflectCash, setReflectCash] = useState(linkedCashIdx >= 0);
-  const fx = h.currency === "ドル建" ? (fxRate || 150) : 1;
+  const fx = fxRateFor(fxRates, h.currency);
   const qty = parseFloat(qtyInput) || 0;
   const amountJpy = isFund ? (qty / 10000) * (parseFloat(priceInput) || 0) : qty * (parseFloat(priceInput) || 0) * fx;
 
@@ -3466,7 +3513,7 @@ function TradeForm({ kind, idx, h, fxRate, cashList, cashLink, onRequestCashPick
             style={{ width: 90, padding: "4px 6px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3 }} />
         </label>
         <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 2 }}>
-          {kind === "buy" ? "購入単価" : "売却単価"}{isFund ? "（1万口あたり・円）" : `（${h.currency === "ドル建" ? "$" : "¥"}）`}
+          {kind === "buy" ? "購入単価" : "売却単価"}{isFund ? "（1万口あたり・円）" : `（${currencySymbolFor(h.currency)}）`}
           <CommaNumberInput value={priceInput} onChange={(v) => setPriceInput(v === null ? "" : String(v))}
             style={{ width: 100, padding: "4px 6px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3 }} />
         </label>
@@ -3501,7 +3548,7 @@ function TradeForm({ kind, idx, h, fxRate, cashList, cashLink, onRequestCashPick
   );
 }
 
-function HoldingCard({ h, idx, onUpdate, onDelete, fxRate, fmtCur = fmtYen, cashList, cashLink, onRequestCashPick, onApplyWithCash, onRequestAccountPick, assetClassList, subclassSuggestions, onOpenClassManager, onCardRef, dragHandleProps, isDragging, setDragRef }) {
+function HoldingCard({ h, idx, onUpdate, onDelete, fxRates, fmtCur = fmtYen, cashList, cashLink, onRequestCashPick, onApplyWithCash, onRequestAccountPick, assetClassList, subclassSuggestions, onOpenClassManager, onCardRef, dragHandleProps, isDragging, setDragRef }) {
   const [expanded, setExpanded] = useState(false);
   const [tradeOpen, setTradeOpen] = useState(null); // null | "buy" | "sell"
   const pl = (h.valueJpy || 0) - (h.avgJpyTotal || 0);
@@ -3602,12 +3649,21 @@ function HoldingCard({ h, idx, onUpdate, onDelete, fxRate, fmtCur = fmtYen, cash
                 style={{ width: 92, textAlign: "right", padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
             </label>
             <label style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              {h.qtyMode === "nav10000" ? "基準価額(¥/1万口)" : h.currency === "USD" ? "単価($)" : "単価(¥)"}
+              {h.qtyMode === "nav10000" ? "基準価額(¥/1万口)" : `単価(${currencySymbolFor(h.currency)})`}
               <CommaNumberInput
-                value={h.qtyMode === "nav10000" || h.currency !== "USD" ? h.priceJpyUnit : h.priceUsdUnit}
-                onChange={(v) => onUpdate(h.qtyMode === "nav10000" || h.currency !== "USD" ? { priceJpyUnit: v ?? 0 } : { priceUsdUnit: v ?? 0 })}
+                value={h.qtyMode === "nav10000" ? h.priceJpyUnit : h.priceUnit}
+                onChange={(v) => onUpdate(h.qtyMode === "nav10000" ? { priceJpyUnit: v ?? 0 } : { priceUnit: v ?? 0 })}
                 style={{ width: 92, textAlign: "right", padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
             </label>
+            {h.qtyMode !== "nav10000" && (
+              <label style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                通貨
+                <select value={h.currency || "JPY"} onChange={(e) => onUpdate({ currency: e.target.value })}
+                  style={{ fontSize: 12, padding: "4px 6px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3 }}>
+                  {CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.code}</option>)}
+                </select>
+              </label>
+            )}
             <label style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               取得額(¥)
               <CommaNumberInput value={h.avgJpyTotal} onChange={(v) => onUpdate({ avgJpyTotal: v ?? 0 })}
@@ -3631,7 +3687,7 @@ function HoldingCard({ h, idx, onUpdate, onDelete, fxRate, fmtCur = fmtYen, cash
             }}>この銘柄を削除</button>
           </div>
           {tradeOpen && (
-            <TradeForm kind={tradeOpen} idx={idx} h={h} fxRate={fxRate} cashList={cashList} cashLink={cashLink}
+            <TradeForm kind={tradeOpen} idx={idx} h={h} fxRates={fxRates} cashList={cashList} cashLink={cashLink}
               onRequestCashPick={onRequestCashPick}
               onApplyWithCash={(i, patch, cashDelta, cashIdx) => { onApplyWithCash(i, patch, cashDelta, cashIdx); setTradeOpen(null); }}
               onCancel={() => setTradeOpen(null)} />
@@ -3893,7 +3949,8 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
   };
 
   const [displayCurrency, setDisplayCurrency] = useState("JPY");
-  const fmtCur = (jpy) => displayCurrency === "USD" ? "$" + fmt((jpy || 0) / (params.fxRate || 150), 2) : fmtYen(jpy);
+  const displayCurrencies = ["JPY", ...[...new Set(holdings.map((h) => h.currency).filter((c) => c && c !== "JPY"))]];
+  const fmtCur = (jpy) => displayCurrency === "JPY" ? fmtYen(jpy) : `${currencySymbolFor(displayCurrency)}${fmt((jpy || 0) / fxRateFor(params.fxRates, displayCurrency), 2)}`;
 
   const [filterOpen, setFilterOpen] = useState(false);
   const [filter, setFilter] = useState({ assetCat: [], subClass: [], tags: [] });
@@ -3920,8 +3977,8 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
     recordHistory();
     setFetching(true);
     try {
-      const { fxRate, valueMap, updated, failed } = await fetchPricesAsOf(asOfDate, holdings, params.fxRate, setFetchStatus);
-      setParams((p) => ({ ...p, fxRate }));
+      const { fxRates, valueMap, updated, failed } = await fetchPricesAsOf(asOfDate, holdings, params.fxRates, setFetchStatus);
+      setParams((p) => ({ ...p, fxRates, fxRate: fxRates.USD ?? p.fxRate }));
       const nameMap = await fetchJaNames(holdings, setFetchStatus);
       setHoldings((prev) => prev.map((h, idx) => {
         const r = valueMap[idx];
@@ -3931,8 +3988,7 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
         if (r) {
           next.valueJpy = r.valueJpy; next.lastUpdated = r.asOf;
           if (h.qtyMode === "nav10000") next.priceJpyUnit = r.price;
-          else if (r.currency === "USD") next.priceUsdUnit = r.price;
-          else next.priceJpyUnit = r.price;
+          else next.priceUnit = r.price;
         }
         if (nameJa) next.nameJa = nameJa;
         return next;
@@ -4052,14 +4108,14 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
           holdings={holdings} setHoldings={setHoldings}
           onClose={() => setShowClassManager(false)} />
       )}
-      <div style={{ padding: "0 16px 10px", display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ padding: "0 16px 10px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span style={{ fontSize: 11, color: INK_SOFT }}>表示通貨</span>
         <div style={{ display: "flex", borderRadius: 4, overflow: "hidden", border: `1px solid ${PAPER_LINE}` }}>
-          {["JPY", "USD"].map((c) => (
+          {displayCurrencies.map((c) => (
             <button key={c} onClick={() => setDisplayCurrency(c)} style={{
               fontSize: 11.5, padding: "4px 12px", border: "none", cursor: "pointer",
               background: displayCurrency === c ? GOLD : "#fff", color: displayCurrency === c ? "#fff" : INK,
-            }}>{c === "JPY" ? "円" : "ドル"}</button>
+            }}>{c === "JPY" ? "円" : c}</button>
           ))}
         </div>
       </div>
@@ -4101,7 +4157,7 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
             }
             setPendingNewAccountId(null);
           }}
-          fxRate={params.fxRate}
+          fxRates={params.fxRates}
           cashList={cashList}
           pendingAccountId={pendingNewAccountId}
           onRequestAccountPick={() => requestAccountPick("NEW")}
@@ -4137,11 +4193,19 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
             )}
           </div>
           {fetchStatus && <div style={{ fontSize: 11.5, color: SUMI, marginTop: 8 }}>{fetchStatus}</div>}
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 11.5, color: INK_SOFT }}>
-            USD/JPY レート:
-            <input type="number" value={params.fxRate} step="0.01"
-              onChange={(e) => setParams((p) => ({ ...p, fxRate: parseFloat(e.target.value) || p.fxRate }))}
-              style={{ width: 70, padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginTop: 10, fontSize: 11.5, color: INK_SOFT }}>
+            {[...new Set(["USD", ...displayCurrencies.filter((c) => c !== "JPY")])].map((code) => (
+              <div key={code} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {code}/JPY レート:
+                <input type="number" value={params.fxRates?.[code] ?? fxRateFor(params.fxRates, code)} step="0.01"
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (Number.isNaN(v)) return;
+                    setParams((p) => ({ ...p, fxRates: { ...(p.fxRates || {}), [code]: v }, fxRate: code === "USD" ? v : p.fxRate }));
+                  }}
+                  style={{ width: 70, padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
+              </div>
+            ))}
           </div>
           <div style={{ fontSize: 10.5, color: INK_SOFT, marginTop: 6 }}>
             ※ 投資信託は元データの保有口数が不明なため、現在の評価額と基準価額から口数を逆算して概算しています（正確な口数ではありません）。過去日付の価格は取得先データの都合上、実際の終値・基準価額と多少ずれる場合があります。
@@ -4207,7 +4271,7 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
             <Accordion key={cat} title={`${cat} — ${fmtCur(subtotal)}`} colorKey={assetCatColorKey(cat)}>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {renderIdxs.map((i) => (
-                  <HoldingCard key={i} idx={i} h={holdings[i]} fxRate={params.fxRate} fmtCur={fmtCur}
+                  <HoldingCard key={i} idx={i} h={holdings[i]} fxRates={params.fxRates} fmtCur={fmtCur}
                     cashList={cashList} cashLink={cashLink}
                     onRequestCashPick={requestCashPick} onApplyWithCash={applyTradeWithCash}
                     onRequestAccountPick={requestAccountPick}
@@ -4305,8 +4369,8 @@ function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, 
   const nowSubRows = Object.entries(nowMap).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
   const nowTotal = securitiesLikeTotalNow + totalCash;
   const nowCurrencyMap = {};
-  holdings.forEach((h) => { const cur = h.currency || "円建"; nowCurrencyMap[cur] = (nowCurrencyMap[cur] || 0) + (h.valueJpy || 0); });
-  nowCurrencyMap["円建"] = (nowCurrencyMap["円建"] || 0) + totalCash;
+  holdings.forEach((h) => { const cur = h.currency || "JPY"; nowCurrencyMap[cur] = (nowCurrencyMap[cur] || 0) + (h.valueJpy || 0); });
+  nowCurrencyMap["JPY"] = (nowCurrencyMap["JPY"] || 0) + totalCash;
   const subWeights = Object.fromEntries(
     Object.entries(subMapNow).map(([k, v]) => [k, securitiesLikeTotalNow > 0 ? v / securitiesLikeTotalNow : 0])
   );
@@ -4513,7 +4577,7 @@ function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, 
                   display: "flex", justifyContent: "space-between", padding: "8px 12px",
                   borderBottom: i < arr.length - 1 ? `1px solid ${PAPER_LINE}` : "none", fontSize: 12.5,
                 }}>
-                  <span style={{ color: INK }}>{k}</span>
+                  <span style={{ color: INK }}>{k}{CURRENCIES.find((c) => c.code === k) ? `（${CURRENCIES.find((c) => c.code === k).label}）` : ""}</span>
                   <span style={{ fontWeight: 600, color: INK, fontVariantNumeric: "tabular-nums" }}>{fmtYen(v)}</span>
                 </div>
               ))}

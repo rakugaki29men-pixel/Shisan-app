@@ -6,8 +6,9 @@ yfinance（無料・APIキー不要）でYahoo Financeのデータを取得す�
 エンドポイント：
   GET /health
       -> {"status": "ok"}
-  GET /fx?date=YYYY-MM-DD (dateは省略可、省略時は最新)
-      -> {"usdjpy": <number>, "date": "YYYY-MM-DD"}
+  GET /fx?currencies=USD,EUR&date=YYYY-MM-DD (dateは省略可、省略時は最新)
+      -> {"rates": {"USD": 150.2, "EUR": 163.4}, "date": "YYYY-MM-DD"}
+      各通貨の対円レート。取得できなかった通貨は結果に含めない。
   GET /prices?symbols=AAPL,VYM,1628.T,BTC-USD&date=YYYY-MM-DD (dateは省略可)
       -> [{"symbol": "AAPL", "price": 123.45, "currency": "USD", "asOf": "2026-09-10"}, ...]
       見つからなかった銘柄は結果の配列から省かれる（投資信託など、そもそも
@@ -43,8 +44,24 @@ def _date_range_around(date_str):
     return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
 
 
+_EXCHANGE_SUFFIX_CURRENCY = {
+    ".T": "JPY",
+    ".PA": "EUR", ".DE": "EUR", ".AS": "EUR", ".MI": "EUR", ".MC": "EUR", ".BR": "EUR",
+    ".L": "GBP",
+    ".SW": "CHF",
+    ".HK": "HKD",
+    ".AX": "AUD",
+    ".TO": "CAD", ".V": "CAD",
+    ".SS": "CNY", ".SZ": "CNY",
+}
+
+
 def _currency_for(symbol):
-    return "JPY" if symbol.upper().endswith(".T") else "USD"
+    su = symbol.upper()
+    for suffix, currency in _EXCHANGE_SUFFIX_CURRENCY.items():
+        if su.endswith(suffix):
+            return currency
+    return "USD"
 
 
 def _last_valid_close(hist):
@@ -113,11 +130,11 @@ def health():
     return jsonify({"status": "ok"})
 
 
-@app.route("/fx")
-def fx():
-    date_str = request.args.get("date")
+def _fetch_one_fx_rate(currency, date_str):
+    # USDJPY=X のような「{通貨}JPY=X」表記はYahoo Financeの為替クロスの標準形式
+    symbol = "JPY=X" if currency == "USD" else f"{currency}JPY=X"
     try:
-        ticker = yf.Ticker("JPY=X")
+        ticker = yf.Ticker(symbol)
         if date_str:
             start, end = _date_range_around(date_str)
             hist = ticker.history(start=start, end=end, auto_adjust=False)
@@ -126,10 +143,31 @@ def fx():
             hist = ticker.history(period="5d", auto_adjust=False)
             price, used_date = _last_valid_close(hist)
         if price is None:
-            return jsonify({"error": "no data"}), 404
-        return jsonify({"usdjpy": round(price, 4), "date": used_date})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+            return currency, None, None
+        return currency, round(price, 4), used_date
+    except Exception:
+        return currency, None, None
+
+
+@app.route("/fx")
+def fx():
+    date_str = request.args.get("date")
+    currencies_param = request.args.get("currencies", "USD")
+    currencies = list({c.strip().upper() for c in currencies_param.split(",") if c.strip() and c.strip().upper() != "JPY"})
+    if not currencies:
+        return jsonify({"rates": {}, "date": None})
+
+    rates = {}
+    used_date = None
+    with ThreadPoolExecutor(max_workers=min(10, len(currencies))) as executor:
+        futures = [executor.submit(_fetch_one_fx_rate, c, date_str) for c in currencies]
+        for future in as_completed(futures):
+            currency, rate, d = future.result()
+            if rate is not None:
+                rates[currency] = rate
+                used_date = used_date or d
+
+    return jsonify({"rates": rates, "date": used_date})
 
 
 def _fetch_one_price(symbol, date_str):
