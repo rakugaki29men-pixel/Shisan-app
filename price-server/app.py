@@ -15,9 +15,14 @@ yfinance（無料・APIキー不要）でYahoo Financeのデータを取得す�
   GET /search?q=<キーワード>
       -> {"candidates": [{"name", "exchange", "ticker", "instrumentType", "currency", "assetCat"}, ...]}
       銘柄名・ティッカーのあいまい検索。Yahoo Financeの検索候補をそのまま変換する。
+  GET /names?symbols=1306.T,7203.T
+      -> {"names": {"1306.T": "NEXT FUNDS TOPIX連動型上場投信", ...}}
+      日本の銘柄（.T）の正式名称のうち、日本語表記が取れたものだけを返す
+      （英語表記しか見つからない銘柄は結果に含めない）。
 """
 import math
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 
@@ -87,6 +92,20 @@ def _split_symbol(symbol, yahoo_exchange):
     if symbol.upper().endswith(".T"):
         return "TYO", symbol[:-2]
     return _EXCHANGE_MAP.get(yahoo_exchange, yahoo_exchange or ""), symbol
+
+
+_JA_CHAR_RE = re.compile(r"[぀-ヿ㐀-鿿]")
+
+
+def _fetch_one_ja_name(symbol):
+    try:
+        info = yf.Ticker(symbol).info
+        name = info.get("longName") or info.get("shortName")
+        if name and _JA_CHAR_RE.search(name):
+            return symbol, name
+    except Exception:
+        pass
+    return symbol, None
 
 
 @app.route("/health")
@@ -184,6 +203,24 @@ def search():
         })
 
     return jsonify({"candidates": candidates[:5]})
+
+
+@app.route("/names")
+def names():
+    symbols_param = request.args.get("symbols", "")
+    symbols = [s.strip() for s in symbols_param.split(",") if s.strip() and s.strip().upper().endswith(".T")][:MAX_SYMBOLS_PER_REQUEST]
+    if not symbols:
+        return jsonify({"names": {}})
+
+    result = {}
+    with ThreadPoolExecutor(max_workers=min(10, len(symbols))) as executor:
+        futures = [executor.submit(_fetch_one_ja_name, s) for s in symbols]
+        for future in as_completed(futures):
+            symbol, name = future.result()
+            if name:
+                result[symbol] = name
+
+    return jsonify({"names": result})
 
 
 if __name__ == "__main__":

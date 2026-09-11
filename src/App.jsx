@@ -276,7 +276,7 @@ function migrateLoadedState(parsed) {
     params: fixedParams,
     holdings: parsed.holdings ? migrateHoldingFields(parsed.holdings) : null,
     cashList: parsed.cashList || null,
-    yearSnapshots: parsed.yearSnapshots || null,
+    portfolioLogs: parsed.portfolioLogs || null,
     family: parsed.family || null,
     ledger: parsed.ledger ? migrateLedgerLinks({ ...defaultLedgerState(), ...parsed.ledger }) : null,
     scenario: parsed.scenario ? { ...defaultScenarioState(), ...parsed.scenario } : null,
@@ -287,7 +287,7 @@ function applyMigratedState(migrated, setters) {
   if (migrated.params) setters.setParams(migrated.params);
   if (migrated.holdings) setters.setHoldings(migrated.holdings);
   if (migrated.cashList) setters.setCashList(migrated.cashList);
-  if (migrated.yearSnapshots) setters.setYearSnapshots(migrated.yearSnapshots);
+  if (migrated.portfolioLogs) setters.setPortfolioLogs(migrated.portfolioLogs);
   if (migrated.family) setters.setFamily(migrated.family);
   if (migrated.ledger) setters.setLedger(migrated.ledger);
   if (migrated.scenario) setters.setScenario(migrated.scenario);
@@ -546,6 +546,27 @@ async function fetchPricesAsOf(dateStr, holdings, fallbackFx, onStatus) {
     }
   }
   return { fxRate, valueMap, updated, failed };
+}
+
+// 日本の銘柄（.T）のうち、まだ日本語名称が未取得のものだけ取得する
+async function fetchJaNames(holdings, onStatus) {
+  if (!PRICE_API_BASE) return {};
+  const targets = holdings
+    .map((h, idx) => ({ idx, symbol: yfSymbolFor(h) }))
+    .filter((h) => h.symbol && h.symbol.endsWith(".T") && !holdings[h.idx].nameJa);
+  if (targets.length === 0) return {};
+
+  onStatus?.("日本語名称を取得中…");
+  const nameMap = {};
+  for (const batch of chunk(targets, 20)) {
+    try {
+      const symbolsParam = [...new Set(batch.map((h) => h.symbol))].join(",");
+      const res = await fetchJson(`${PRICE_API_BASE}/names?symbols=${encodeURIComponent(symbolsParam)}`);
+      const names = res?.names || {};
+      batch.forEach((h) => { if (names[h.symbol]) nameMap[h.idx] = names[h.symbol]; });
+    } catch (e) { /* この分だけスキップし、他は継続 */ }
+  }
+  return nameMap;
 }
 
 /* ============================================================
@@ -3405,6 +3426,9 @@ function HoldingCard({ h, idx, onUpdate, onDelete, fxRate, fmtCur = fmtYen, cash
           <div style={{ fontSize: 12.5, fontWeight: 600, color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {h.ticker ? `${h.ticker} ` : ""}{h.name}
           </div>
+          {h.nameJa && (
+            <div style={{ fontSize: 10.5, color: INK_SOFT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.nameJa}</div>
+          )}
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 3 }}>
             {h.subClass && <span style={{ fontSize: 9.5, background: PAPER, border: `1px solid ${PAPER_LINE}`, borderRadius: 8, padding: "1px 6px", color: INK_SOFT }}>{h.subClass}</span>}
             {(h.tags || []).map((t) => (
@@ -3630,13 +3654,19 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
     try {
       const { fxRate, valueMap, updated, failed } = await fetchPricesAsOf(asOfDate, holdings, params.fxRate, setFetchStatus);
       setParams((p) => ({ ...p, fxRate }));
+      const nameMap = await fetchJaNames(holdings, setFetchStatus);
       setHoldings((prev) => prev.map((h, idx) => {
         const r = valueMap[idx];
-        if (!r) return h;
-        const next = { ...h, valueJpy: r.valueJpy, lastUpdated: r.asOf };
-        if (h.qtyMode === "nav10000") next.priceJpyUnit = r.price;
-        else if (r.currency === "USD") next.priceUsdUnit = r.price;
-        else next.priceJpyUnit = r.price;
+        const nameJa = nameMap[idx];
+        if (!r && !nameJa) return h;
+        const next = { ...h };
+        if (r) {
+          next.valueJpy = r.valueJpy; next.lastUpdated = r.asOf;
+          if (h.qtyMode === "nav10000") next.priceJpyUnit = r.price;
+          else if (r.currency === "USD") next.priceUsdUnit = r.price;
+          else next.priceJpyUnit = r.price;
+        }
+        if (nameJa) next.nameJa = nameJa;
         return next;
       }));
       setFetchStatus(`完了：${updated}件更新${failed ? `（${failed}件失敗）` : ""}`);
@@ -3914,35 +3944,9 @@ function renderPieLeaderLabel(colors) {
   };
 }
 
-function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, yearSnapshots, setYearSnapshots }) {
+function AggregationTab({ holdings, cashList, asOfDate, portfolioLogs, setPortfolioLogs }) {
   const totalCash = cashList.reduce((s, c) => s + (c.amount || 0), 0);
-  const model = useMemo(() => computeModel(sim, params), [sim, params]);
-
-  const anchorYear = parseInt((asOfDate || "").slice(0, 4), 10) || new Date().getFullYear();
-  const currentIdx = Math.min(Math.max(anchorYear - YEARS[0], 0), N - 1);
-  const [yearIdx, setYearIdx] = useState(currentIdx);
-  useEffect(() => { setYearIdx(currentIdx); }, [currentIdx]);
-  const isNow = yearIdx === currentIdx;
-  const selectedYear = YEARS[yearIdx];
-  const snapshot = yearSnapshots[selectedYear];
-  const isPast = selectedYear < anchorYear;
-  const [snapFetching, setSnapFetching] = useState(false);
-  const [snapStatus, setSnapStatus] = useState("");
-
-  const fetchYearSnapshot = async () => {
-    setSnapFetching(true);
-    try {
-      const dateStr = `${selectedYear}-12-31`;
-      const { fxRate, valueMap, updated, failed } = await fetchPricesAsOf(dateStr, holdings, params.fxRate, setSnapStatus);
-      setYearSnapshots((prev) => ({ ...prev, [selectedYear]: { valueMap, fxRate, fetchedAt: new Date().toISOString().slice(0, 10) } }));
-      setSnapStatus(`完了：${updated}件取得${failed ? `（${failed}件失敗）` : ""}`);
-    } catch (e) {
-      setSnapStatus(e?.message || "取得に失敗しました。");
-    } finally {
-      setSnapFetching(false);
-      setTimeout(() => setSnapStatus(""), 5000);
-    }
-  };
+  const todayStr = new Date().toISOString().slice(0, 10);
 
   // 「現在」時点：実際の保有ポートフォリオから内訳を作る
   const subMapNow = {};
@@ -3954,49 +3958,43 @@ function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, 
     subMapNow[key] = (subMapNow[key] || 0) + (h.valueJpy || 0);
     securitiesLikeTotalNow += h.valueJpy || 0;
   });
-  const subWeights = Object.fromEntries(
-    Object.entries(subMapNow).map(([k, v]) => [k, securitiesLikeTotalNow > 0 ? v / securitiesLikeTotalNow : 0])
-  );
+  const nowMap = { ...subMapNow, "現金 / 現金": totalCash };
+  const nowSubRows = Object.entries(nowMap).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+  const nowTotal = securitiesLikeTotalNow + totalCash;
+  const nowCurrencyMap = {};
+  holdings.forEach((h) => { const cur = h.currency || "円建"; nowCurrencyMap[cur] = (nowCurrencyMap[cur] || 0) + (h.valueJpy || 0); });
+  nowCurrencyMap["円建"] = (nowCurrencyMap["円建"] || 0) + totalCash;
 
-  let subRows, total, cashPortion, mode;
-  if (isNow) {
-    const map = { ...subMapNow, "現金 / 現金": totalCash };
-    subRows = Object.entries(map).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
-    total = securitiesLikeTotalNow + totalCash;
-    cashPortion = totalCash;
-    mode = "now";
-  } else if (snapshot) {
-    // 過去の実勢価格（Web検索で取得済み）を反映
-    const map = {};
-    holdings.forEach((h, idx) => {
-      const v = snapshot.valueMap[idx];
-      if (!v) return;
-      const cat = h.assetCat || "その他";
-      const sub = h.subClass || "その他";
-      const key = `${cat} / ${sub}`;
-      map[key] = (map[key] || 0) + v.valueJpy;
-    });
-    const secTotal = Object.values(map).reduce((a, b) => a + b, 0);
-    if (totalCash > 0) map["現金 / 現金（現在の残高で代用）"] = totalCash;
-    subRows = Object.entries(map).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
-    total = secTotal + totalCash;
-    cashPortion = totalCash;
-    mode = "snapshot";
-  } else {
-    // 実データのない年：現在の資産配分比率を、その年のシミュレーション結果に適用した試算値
-    // （シミュレーションの数値は万円単位のため、円単位のポートフォリオ・現金と合わせるために×10,000する）
-    const secVal = model.securities[yearIdx] * 10000;
-    const cashVal = model.cash[yearIdx] * 10000;
-    const reVal = model.realEstateAsset[yearIdx] * 10000;
-    const map = {};
-    Object.entries(subWeights).forEach(([k, w]) => { if (w > 0) map[k] = w * secVal; });
-    if (cashVal > 0) map["現金 / 現金"] = cashVal;
-    if (reVal > 0) map["不動産 / 自宅"] = reVal;
-    subRows = Object.entries(map).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
-    total = secVal + cashVal + reVal;
-    cashPortion = cashVal;
-    mode = "estimate";
-  }
+  const [selectedLogId, setSelectedLogId] = useState(null);
+  const selectedLog = selectedLogId ? portfolioLogs.find((l) => l.id === selectedLogId) : null;
+  const isNow = !selectedLog;
+
+  const subRows = isNow ? nowSubRows : selectedLog.subRows;
+  const total = isNow ? nowTotal : selectedLog.total;
+  const cashPortion = isNow ? totalCash : selectedLog.cashPortion;
+  const currencyMap = isNow ? nowCurrencyMap : (selectedLog.currencyMap || {});
+
+  const [recording, setRecording] = useState(false);
+  const [labelInput, setLabelInput] = useState("");
+  const startRecording = () => { setLabelInput(todayStr); setRecording(true); };
+  const saveLog = () => {
+    const newLog = {
+      id: `log_${Date.now()}`,
+      label: labelInput.trim() || todayStr,
+      createdAt: todayStr,
+      subRows: nowSubRows, total: nowTotal, cashPortion: totalCash, currencyMap: nowCurrencyMap,
+    };
+    setPortfolioLogs((prev) => [...prev, newLog]);
+    setRecording(false);
+    setSelectedLogId(newLog.id);
+  };
+  const deleteLog = (id) => {
+    if (!window.confirm("この記録を削除しますか？元に戻せません。")) return;
+    setPortfolioLogs((prev) => prev.filter((l) => l.id !== id));
+    if (selectedLogId === id) setSelectedLogId(null);
+  };
+  const sortedLogs = [...portfolioLogs].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+
   // アセットクラスの合計が大きい順にグループ化し、同じクラスの扇形が隣り合うようにする
   // （クラス内はサブクラスの大きい順）。色はクラス単位で塗り、境界線でサブクラスを見分ける。
   const pieRows = subRows.map(([k, v]) => {
@@ -4014,70 +4012,59 @@ function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, 
     return colorForAssetCat(sepIdx >= 0 ? k.slice(0, sepIdx) : k);
   };
 
-  const currencyMap = {};
-  if (isNow) {
-    holdings.forEach((h) => { const cur = h.currency || "円建"; currencyMap[cur] = (currencyMap[cur] || 0) + (h.valueJpy || 0); });
-    currencyMap["円建"] = (currencyMap["円建"] || 0) + totalCash;
-  }
-
   return (
     <div style={{ paddingBottom: 40 }}>
       <SectionHeader title="資産集計" sub={
-        mode === "now" ? `${asOfDate} 時点の保有ポートフォリオ・現金の内訳` :
-        mode === "snapshot" ? `${selectedYear}年末の実勢価格（${snapshot.fetchedAt}に取得）に基づく内訳` :
-        "試算：その年の資産配分（指定時点の保有比率をシミュレーション結果に適用した推計）"
+        isNow ? `${asOfDate} 時点の保有ポートフォリオ・現金の内訳` : `記録「${selectedLog.label}」（${selectedLog.createdAt}保存）の内訳`
       } />
 
       <div style={{ padding: "0 16px 6px" }}>
         <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: "14px 16px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-            <span style={{ fontFamily: "'Shippori Mincho','Noto Serif JP',serif", fontSize: 22, color: INK }}>{selectedYear}年</span>
-            {mode === "now" ? (
-              <span style={{ fontSize: 11, background: SUMI_SOFT, color: SUMI, padding: "2px 8px", borderRadius: 10 }}>実績（{asOfDate}時点）</span>
-            ) : mode === "snapshot" ? (
-              <span style={{ fontSize: 11, background: SUMI_SOFT, color: SUMI, padding: "2px 8px", borderRadius: 10 }}>実勢価格（取得済み）</span>
-            ) : (
-              <span style={{ fontSize: 11, background: GOLD_SOFT, color: GOLD, padding: "2px 8px", borderRadius: 10 }}>シミュレーション試算</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <select value={selectedLogId || ""} onChange={(e) => setSelectedLogId(e.target.value || null)}
+              style={{ fontSize: 13, padding: "6px 8px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, flex: 1, minWidth: 140 }}>
+              <option value="">現在</option>
+              {sortedLogs.map((l) => <option key={l.id} value={l.id}>{l.label}（{l.createdAt}）</option>)}
+            </select>
+            {!isNow && (
+              <button onClick={() => setSelectedLogId(null)} style={{
+                fontSize: 11.5, padding: "6px 10px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`, background: "transparent", cursor: "pointer",
+              }}>現在に戻る</button>
             )}
           </div>
-          <input
-            type="range" min={0} max={N - 1} step={1} value={yearIdx}
-            onChange={(e) => setYearIdx(parseInt(e.target.value, 10))}
-            style={{ width: "100%", accentColor: GOLD }}
-          />
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: INK_SOFT, marginTop: 2 }}>
-            <span>{YEARS[0]}年</span>
-            <span>{YEARS[N - 1]}年</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+            {!recording ? (
+              <button onClick={startRecording} style={{
+                fontSize: 11.5, padding: "6px 12px", borderRadius: 4, border: "none", cursor: "pointer",
+                background: GOLD, color: "#fff", fontWeight: 600,
+              }}>📌 現在の状態を記録する</button>
+            ) : (
+              <>
+                <input value={labelInput} onChange={(e) => setLabelInput(e.target.value)} placeholder="記録の名前"
+                  style={{ fontSize: 12.5, padding: "6px 8px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, flex: 1, minWidth: 120 }} />
+                <button onClick={saveLog} style={{
+                  fontSize: 11.5, padding: "6px 12px", borderRadius: 4, border: "none", cursor: "pointer", background: GOLD, color: "#fff", fontWeight: 600,
+                }}>保存</button>
+                <button onClick={() => setRecording(false)} style={{
+                  fontSize: 11.5, padding: "6px 12px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`, background: "transparent", cursor: "pointer",
+                }}>キャンセル</button>
+              </>
+            )}
+            {!isNow && !recording && (
+              <button onClick={() => deleteLog(selectedLogId)} style={{
+                fontSize: 11.5, padding: "6px 12px", borderRadius: 4, border: `1px solid ${SEAL}`, background: "transparent", color: SEAL, cursor: "pointer",
+              }}>この記録を削除</button>
+            )}
           </div>
-          {isPast && (
-            <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${PAPER_LINE}` }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <button onClick={fetchYearSnapshot} disabled={snapFetching} style={{
-                  fontSize: 11.5, padding: "6px 12px", borderRadius: 4, border: "none", cursor: snapFetching ? "default" : "pointer",
-                  background: snapFetching ? "#C9BFA5" : GOLD, color: "#fff", fontWeight: 600,
-                }}>{snapFetching ? "取得中…" : snapshot ? "この年を再取得" : "この年末の実勢価格を取得"}</button>
-                {snapStatus && <span style={{ fontSize: 11, color: SUMI }}>{snapStatus}</span>}
-              </div>
-              {!PRICE_API_BASE && (
-                <div style={{ fontSize: 11, color: SEAL, background: SEAL_SOFT, borderRadius: 4, padding: "6px 8px", marginTop: 6 }}>
-                  ⚠ 価格自動取得サーバーが未設定のため、ボタンを押すと「失敗」になります。
-                </div>
-              )}
-              <div style={{ fontSize: 10, color: INK_SOFT, marginTop: 6 }}>
-                {selectedYear}年12月31日（休場日ならその直前の取引日）の終値・基準価額を取得し、現在保有している銘柄で当時の資産配分を再現します。現金残高は当時の記録がないため現在の残高で代用しています。
-              </div>
-            </div>
-          )}
+          <div style={{ fontSize: 10, color: INK_SOFT, marginTop: 8 }}>
+            現在の保有状況をいつでも「地点」として記録し、あとから見返せます（記録後は当時の評価額のまま固定され、以降の編集の影響を受けません）。
+          </div>
         </div>
       </div>
-
 
       <div style={{ display: "flex", gap: 8, padding: "10px 16px 14px", flexWrap: "wrap" }}>
         <StatCard label="資産評価額" value={fmtYen(total)} tone="gold" />
         <StatCard label="現金比率" value={total > 0 ? fmt((cashPortion / total) * 100, 1) + "%" : "-"} tone="ink" />
-      </div>
-      <div style={{ padding: "0 16px 10px" }}>
-        <RealEstateToggle params={params} setParams={setParams} />
       </div>
 
       <div style={{ padding: "0 16px", height: 360, background: CARD }}>
@@ -4090,17 +4077,6 @@ function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, 
           </PieChart>
         </ResponsiveContainer>
       </div>
-      {mode === "estimate" && (
-        <div style={{ padding: "6px 16px 0", fontSize: 10.5, color: INK_SOFT }}>
-          ※ この年の実際の保有記録はデータ上ないため、現在の資産配分比率をシミュレーション上の金額に当てはめた推計値です。上のボタンで実勢価格を取得すると、実際の銘柄データに基づく内訳に切り替わります。
-        </div>
-      )}
-      {mode === "snapshot" && (
-        <div style={{ padding: "6px 16px 0", fontSize: 10.5, color: INK_SOFT }}>
-          ※ 取得先データの都合上、実際の終値・基準価額と多少ずれる場合があります。現金残高は当時の記録がなく現在の残高を代用しています。
-        </div>
-      )}
-
       <SectionHeader title="内訳明細" />
       <div style={{ padding: "0 16px" }}>
         <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 5, overflow: "hidden", background: CARD }}>
@@ -4146,24 +4122,20 @@ function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, 
         </div>
       </div>
 
-      {isNow && (
-        <>
-          <SectionHeader title="通貨別内訳" />
-          <div style={{ padding: "0 16px" }}>
-            <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 5, overflow: "hidden", background: CARD }}>
-              {Object.entries(currencyMap).filter(([, v]) => v > 0).map(([k, v], i, arr) => (
-                <div key={k} style={{
-                  display: "flex", justifyContent: "space-between", padding: "8px 12px",
-                  borderBottom: i < arr.length - 1 ? `1px solid ${PAPER_LINE}` : "none", fontSize: 12.5,
-                }}>
-                  <span style={{ color: INK }}>{k}</span>
-                  <span style={{ fontWeight: 600, color: INK, fontVariantNumeric: "tabular-nums" }}>{fmtYen(v)}</span>
-                </div>
-              ))}
+      <SectionHeader title="通貨別内訳" />
+      <div style={{ padding: "0 16px" }}>
+        <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 5, overflow: "hidden", background: CARD }}>
+          {Object.entries(currencyMap).filter(([, v]) => v > 0).map(([k, v], i, arr) => (
+            <div key={k} style={{
+              display: "flex", justifyContent: "space-between", padding: "8px 12px",
+              borderBottom: i < arr.length - 1 ? `1px solid ${PAPER_LINE}` : "none", fontSize: 12.5,
+            }}>
+              <span style={{ color: INK }}>{k}</span>
+              <span style={{ fontWeight: 600, color: INK, fontVariantNumeric: "tabular-nums" }}>{fmtYen(v)}</span>
             </div>
-          </div>
-        </>
-      )}
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -4621,7 +4593,7 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [saveNote, setSaveNote] = useState("");
   const [asOfDate, setAsOfDate] = useState(new Date().toISOString().slice(0, 10));
-  const [yearSnapshots, setYearSnapshots] = useState({});
+  const [portfolioLogs, setPortfolioLogs] = useState([]);
   const [family, setFamily] = useState(defaultFamilyState);
   const [showFamilyModal, setShowFamilyModal] = useState(false);
   const [showCostWizard, setShowCostWizard] = useState(false);
@@ -4651,7 +4623,7 @@ export default function App() {
       if (raw) {
         const parsed = JSON.parse(raw);
         applyMigratedState(migrateLoadedState(parsed), {
-          setSim, setParams, setHoldings, setCashList, setYearSnapshots, setFamily, setLedger, setScenario,
+          setSim, setParams, setHoldings, setCashList, setPortfolioLogs, setFamily, setLedger, setScenario,
         });
       }
     } catch (e) { /* no saved state yet */ }
@@ -4681,7 +4653,7 @@ export default function App() {
       if (data) {
         skipNextCloudSaveRef.current = true;
         applyMigratedState(migrateLoadedState(data), {
-          setSim, setParams, setHoldings, setCashList, setYearSnapshots, setFamily, setLedger, setScenario,
+          setSim, setParams, setHoldings, setCashList, setPortfolioLogs, setFamily, setLedger, setScenario,
         });
       }
       setCloudDataLoaded(true);
@@ -4694,25 +4666,25 @@ export default function App() {
     if (skipNextCloudSaveRef.current) { skipNextCloudSaveRef.current = false; return; }
     if (cloudSaveTimer.current) clearTimeout(cloudSaveTimer.current);
     cloudSaveTimer.current = setTimeout(() => {
-      saveHouseholdData(householdId, { sim, params, holdings, cashList, yearSnapshots, family, ledger, scenario })
+      saveHouseholdData(householdId, { sim, params, holdings, cashList, portfolioLogs, family, ledger, scenario })
         .catch(() => { /* オフライン等：次の変更時に再送される */ });
     }, 700);
     return () => clearTimeout(cloudSaveTimer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sim, params, holdings, cashList, yearSnapshots, family, ledger, scenario, householdId, cloudDataLoaded]);
+  }, [sim, params, holdings, cashList, portfolioLogs, family, ledger, scenario, householdId, cloudDataLoaded]);
 
   useEffect(() => {
     if (!loaded) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ sim, params, holdings, cashList, yearSnapshots, family, ledger, scenario }));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ sim, params, holdings, cashList, portfolioLogs, family, ledger, scenario }));
         setSaveNote("保存済み");
         setTimeout(() => setSaveNote(""), 1500);
       } catch (e) { /* storage unavailable */ }
     }, 700);
     return () => clearTimeout(saveTimer.current);
-  }, [sim, params, holdings, cashList, yearSnapshots, family, ledger, scenario, loaded]);
+  }, [sim, params, holdings, cashList, portfolioLogs, family, ledger, scenario, loaded]);
 
   const resetAll = () => {
     if (!window.confirm("編集内容をすべて元のデータに戻しますか？（家計簿の入力データも消えます）")) return;
@@ -4720,7 +4692,7 @@ export default function App() {
     setParams(defaultParamsState());
     setHoldings(defaultPortfolioState());
     setCashList(defaultCashState());
-    setYearSnapshots({});
+    setPortfolioLogs([]);
     setFamily(defaultFamilyState());
     setLedger(defaultLedgerState());
     setScenario(defaultScenarioState());
@@ -4728,7 +4700,7 @@ export default function App() {
 
   const fileInputRef = useRef(null);
   const exportData = () => {
-    const payload = { sim, params, holdings, cashList, yearSnapshots, family, ledger, scenario, exportedAt: new Date().toISOString() };
+    const payload = { sim, params, holdings, cashList, portfolioLogs, family, ledger, scenario, exportedAt: new Date().toISOString() };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -4749,7 +4721,7 @@ export default function App() {
         const parsed = JSON.parse(ev.target.result);
         if (!window.confirm("このファイルの内容で、今の編集内容を上書きします。よろしいですか？")) return;
         applyMigratedState(migrateLoadedState(parsed), {
-          setSim, setParams, setHoldings, setCashList, setYearSnapshots, setFamily, setLedger, setScenario,
+          setSim, setParams, setHoldings, setCashList, setPortfolioLogs, setFamily, setLedger, setScenario,
         });
         setSaveNote("読み込み完了");
         setTimeout(() => setSaveNote(""), 1500);
@@ -4825,7 +4797,7 @@ export default function App() {
 
       {tab === "sim" && <SimulationTab sim={sim} setSim={setSim} params={params} setParams={setParams} scenario={scenario} setScenario={setScenario} onOpenWizard={openCostWizard} onOpenSheet={() => setShowSheet(true)} />}
       {tab === "portfolio" && <PortfolioTab holdings={holdings} setHoldings={setHoldings} cashList={cashList} setCashList={setCashList} params={params} setParams={setParams} asOfDate={asOfDate} setAsOfDate={setAsOfDate} />}
-      {tab === "aggregate" && <AggregationTab holdings={holdings} cashList={cashList} sim={sim} params={params} setParams={setParams} asOfDate={asOfDate} yearSnapshots={yearSnapshots} setYearSnapshots={setYearSnapshots} />}
+      {tab === "aggregate" && <AggregationTab holdings={holdings} cashList={cashList} asOfDate={asOfDate} portfolioLogs={portfolioLogs} setPortfolioLogs={setPortfolioLogs} />}
       {showSheet && (
         <div style={{ position: "fixed", inset: 0, background: PAPER, zIndex: 200, overflowY: "auto", fontFamily: "'Noto Sans JP','Hiragino Sans',sans-serif" }}>
           <div style={{ background: INK, color: PAPER, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, zIndex: 6 }}>
