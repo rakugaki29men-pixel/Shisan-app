@@ -275,7 +275,7 @@ function migrateLoadedState(parsed) {
     sim: fixedSim,
     params: fixedParams,
     holdings: parsed.holdings ? migrateHoldingFields(parsed.holdings) : null,
-    cashList: parsed.cashList || null,
+    cashList: parsed.cashList ? migrateCashIds(parsed.cashList) : null,
     portfolioLogs: parsed.portfolioLogs || null,
     family: parsed.family || null,
     ledger: parsed.ledger ? migrateLedgerLinks({ ...defaultLedgerState(), ...parsed.ledger }) : null,
@@ -330,7 +330,20 @@ function migrateHoldingFields(holdings) {
 }
 
 function defaultPortfolioState() { return migrateHoldingFields(clone(RAW.portfolio.holdings)); }
-function defaultCashState() { return clone(RAW.cash); }
+
+// 現金口座を保有銘柄から安定して参照できるよう、行の並べ替えに影響されないIDを付与する
+function genCashId() { return `cash_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`; }
+function migrateCashIds(cashList) {
+  if (!Array.isArray(cashList)) return cashList;
+  let changed = false;
+  const next = cashList.map((c) => {
+    if (c.id) return c;
+    changed = true;
+    return { ...c, id: genCashId() };
+  });
+  return changed ? next : cashList;
+}
+function defaultCashState() { return migrateCashIds(clone(RAW.cash)); }
 
 function defaultFamilyState() {
   return [
@@ -3085,7 +3098,7 @@ function SubClassField({ assetCat, value, onChange }) {
   );
 }
 
-function AddHoldingForm({ onAdd, fxRate }) {
+function AddHoldingForm({ onAdd, fxRate, cashList, pendingAccountId, onRequestAccountPick, onClearAccountId }) {
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [candidates, setCandidates] = useState(null);
@@ -3170,7 +3183,7 @@ function AddHoldingForm({ onAdd, fxRate }) {
     // 取得額合計は「数量（または口数）× 取得単価」から自動算出
     const avgJpyTotal = isFund ? (qty / 10000) * unitPrice : qty * unitPrice * fx;
     const newHolding = {
-      account: "", exchange: picked.exchange || "", ticker: picked.ticker || "",
+      linkedCashId: pendingAccountId || null, exchange: picked.exchange || "", ticker: picked.ticker || "",
       name: picked.name, qty: isFund ? 1 : qty,
       avgJpyTotal,
       priceUsdUnit: picked.currency === "USD" && !isFund ? unitPrice : null,
@@ -3306,6 +3319,21 @@ function AddHoldingForm({ onAdd, fxRate }) {
                 取得額合計：{fmtYen(isFundPicked ? ((parseFloat(qtyInput) || 0) / 10000) * (parseFloat(priceInput) || 0) : (parseFloat(qtyInput) || 0) * (parseFloat(priceInput) || 0) * (picked.currency === "USD" ? (fxRate || 150) : 1))}
               </div>
 
+              <div style={{ fontSize: 10.5, color: INK_SOFT, marginTop: 8, marginBottom: 4 }}>口座（任意）</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                {pendingAccountId ? (
+                  <>
+                    <span style={{ fontSize: 12, color: INK }}>{cashList.find((c) => c.id === pendingAccountId)?.bank || "（口座名未設定）"}</span>
+                    <button onClick={onRequestAccountPick} style={{ fontSize: 10.5, padding: "2px 8px", borderRadius: 10, border: `1px solid ${PAPER_LINE}`, background: "#fff", color: INK_SOFT, cursor: "pointer" }}>変更</button>
+                    <button onClick={onClearAccountId} style={{ fontSize: 10.5, padding: "2px 8px", borderRadius: 10, border: `1px solid ${PAPER_LINE}`, background: "#fff", color: INK_SOFT, cursor: "pointer" }}>解除</button>
+                  </>
+                ) : (
+                  <button onClick={onRequestAccountPick} style={{ fontSize: 11.5, padding: "5px 10px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`, background: "#fff", color: INK, cursor: "pointer" }}>
+                    口座を選ぶ →
+                  </button>
+                )}
+              </div>
+
               <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                 <button onClick={confirmAdd} disabled={priceFetching} style={{ fontSize: 12, padding: "6px 12px", borderRadius: 4, border: "none", background: SUMI, color: "#fff", cursor: "pointer" }}>この内容で追加</button>
                 <button onClick={() => setPicked(null)} style={{ fontSize: 12, padding: "6px 12px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`, background: "transparent", cursor: "pointer" }}>戻る</button>
@@ -3332,7 +3360,7 @@ function TradeForm({ kind, idx, h, fxRate, cashList, cashLink, onRequestCashPick
   const qty = parseFloat(qtyInput) || 0;
   const amountJpy = isFund ? (qty / 10000) * (parseFloat(priceInput) || 0) : qty * (parseFloat(priceInput) || 0) * fx;
 
-  const isLinkedHere = cashLink && cashLink.holdingIdx === idx;
+  const isLinkedHere = cashLink && cashLink.mode === "trade" && cashLink.holdingIdx === idx;
   const selectedCashIdx = isLinkedHere ? cashLink.cashIdx : null;
   const selectedCashRow = selectedCashIdx != null ? cashList[selectedCashIdx] : null;
 
@@ -3405,11 +3433,13 @@ function TradeForm({ kind, idx, h, fxRate, cashList, cashLink, onRequestCashPick
   );
 }
 
-function HoldingCard({ h, idx, onUpdate, onDelete, fxRate, fmtCur = fmtYen, cashList, cashLink, onRequestCashPick, onApplyWithCash, onCardRef, dragHandleProps, isDragging, setDragRef }) {
+function HoldingCard({ h, idx, onUpdate, onDelete, fxRate, fmtCur = fmtYen, cashList, cashLink, onRequestCashPick, onApplyWithCash, onRequestAccountPick, onCardRef, dragHandleProps, isDragging, setDragRef }) {
   const [expanded, setExpanded] = useState(false);
   const [tradeOpen, setTradeOpen] = useState(null); // null | "buy" | "sell"
   const pl = (h.valueJpy || 0) - (h.avgJpyTotal || 0);
   const displayQty = h.qtyMode === "nav10000" ? h.unitsImplied : h.qty;
+  const linkedCashRow = h.linkedCashId ? cashList.find((c) => c.id === h.linkedCashId) : null;
+  const isPickingAccount = cashLink && cashLink.mode === "account" && cashLink.holdingIdx === idx && cashLink.cashIdx === null;
 
   return (
     <div ref={(el) => { onCardRef?.(idx, el); setDragRef?.(el); }} style={{
@@ -3450,6 +3480,27 @@ function HoldingCard({ h, idx, onUpdate, onDelete, fxRate, fmtCur = fmtYen, cash
           {h.memo && (
             <div style={{ fontSize: 10.5, color: INK_SOFT, fontStyle: "italic", marginBottom: 8 }}>{h.memo}</div>
           )}
+          <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 2, marginBottom: 8 }}>
+            銘柄名
+            <input value={h.name || ""} onChange={(e) => onUpdate({ name: e.target.value })}
+              style={{ fontSize: 12.5, padding: "5px 6px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3 }} />
+          </label>
+          <div style={{ fontSize: 10.5, color: INK_SOFT, marginBottom: 4 }}>口座</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+            {linkedCashRow ? (
+              <>
+                <span style={{ fontSize: 12, color: INK }}>{linkedCashRow.bank || "（口座名未設定）"}</span>
+                <button onClick={() => onRequestAccountPick(idx)} style={{ fontSize: 10.5, padding: "2px 8px", borderRadius: 10, border: `1px solid ${PAPER_LINE}`, background: "#fff", color: INK_SOFT, cursor: "pointer" }}>変更</button>
+                <button onClick={() => onUpdate({ linkedCashId: null })} style={{ fontSize: 10.5, padding: "2px 8px", borderRadius: 10, border: `1px solid ${PAPER_LINE}`, background: "#fff", color: INK_SOFT, cursor: "pointer" }}>解除</button>
+              </>
+            ) : isPickingAccount ? (
+              <span style={{ fontSize: 11, color: GOLD }}>下の現金一覧からタップして選択中…</span>
+            ) : (
+              <button onClick={() => onRequestAccountPick(idx)} style={{ fontSize: 11.5, padding: "5px 10px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`, background: "#fff", color: INK, cursor: "pointer" }}>
+                口座を選ぶ →
+              </button>
+            )}
+          </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
             <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 2 }}>
               資産クラス
@@ -3486,11 +3537,6 @@ function HoldingCard({ h, idx, onUpdate, onDelete, fxRate, fmtCur = fmtYen, cash
             <label style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               取得額(¥)
               <CommaNumberInput value={h.avgJpyTotal} onChange={(v) => onUpdate({ avgJpyTotal: v ?? 0 })}
-                style={{ width: 92, textAlign: "right", padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              評価額(¥)
-              <CommaNumberInput value={h.valueJpy} onChange={(v) => onUpdate({ valueJpy: v ?? 0 })}
                 style={{ width: 92, textAlign: "right", padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
             </label>
           </div>
@@ -3706,7 +3752,7 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
   const updateCashField = (idx, field, value) => {
     setCashList((prev) => { const next = [...prev]; next[idx] = { ...next[idx], [field]: value }; return next; });
   };
-  const addCash = () => setCashList((prev) => [...prev, { bank: "", amount: 0 }]);
+  const addCash = () => setCashList((prev) => [...prev, { bank: "", amount: 0, id: genCashId() }]);
   const cashDrag = useDragReorder((order, from, to) => setCashList((prev) => reorderArrayBySlots(prev, order, from, to)));
   const holdingDrag = useDragReorder((order, from, to) => setHoldings((prev) => reorderArrayBySlots(prev, order, from, to)));
   const deleteCash = (idx) => setCashList((prev) => prev.filter((_, i) => i !== idx));
@@ -3715,25 +3761,39 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
     setHoldings((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  // 買い増し・売却を現金口座に反映するための「口座選び」の受け渡し
-  const [cashLink, setCashLink] = useState(null); // { holdingIdx, cashIdx: number|null }
+  // 買い増し・売却を現金口座に反映する「口座選び」と、銘柄への口座の紐付けの、両方に使う受け渡し
+  const [cashLink, setCashLink] = useState(null); // { mode: "trade"|"account", holdingIdx: number|"NEW", cashIdx: number|null }
   const [cashOpen, setCashOpen] = useState(true);
   const cashSectionRef = useRef(null);
   const holdingRefs = useRef({});
+  const [pendingNewAccountId, setPendingNewAccountId] = useState(null);
   const requestCashPick = (holdingIdx) => {
-    setCashLink({ holdingIdx, cashIdx: null });
+    setCashLink({ mode: "trade", holdingIdx, cashIdx: null });
+    setCashOpen(true);
+    requestAnimationFrame(() => cashSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
+  const requestAccountPick = (holdingIdx) => {
+    setCashLink({ mode: "account", holdingIdx, cashIdx: null });
     setCashOpen(true);
     requestAnimationFrame(() => cashSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
   };
   const pickCashRow = (cashIdx) => {
     if (!cashLink) return;
     const holdingIdx = cashLink.holdingIdx;
-    setCashLink({ holdingIdx, cashIdx });
+    if (cashLink.mode === "account") {
+      const cashId = cashList[cashIdx].id;
+      if (holdingIdx === "NEW") setPendingNewAccountId(cashId);
+      else updateHoldingPatch(holdingIdx, { linkedCashId: cashId });
+      setCashLink(null);
+      if (holdingIdx !== "NEW") requestAnimationFrame(() => holdingRefs.current[holdingIdx]?.scrollIntoView({ behavior: "smooth", block: "center" }));
+      return;
+    }
+    setCashLink({ mode: "trade", holdingIdx, cashIdx });
     requestAnimationFrame(() => holdingRefs.current[holdingIdx]?.scrollIntoView({ behavior: "smooth", block: "center" }));
   };
   const applyTradeWithCash = (holdingIdx, patch, cashDelta) => {
     updateHoldingPatch(holdingIdx, patch);
-    if (cashLink && cashLink.holdingIdx === holdingIdx && cashLink.cashIdx != null && cashDelta) {
+    if (cashLink && cashLink.mode === "trade" && cashLink.holdingIdx === holdingIdx && cashLink.cashIdx != null && cashDelta) {
       const ci = cashLink.cashIdx;
       setCashList((prev) => {
         const next = [...prev];
@@ -3787,7 +3847,14 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
       )}
 
       <div style={{ padding: "0 16px" }}>
-        <AddHoldingForm onAdd={(h) => setHoldings((prev) => [...prev, h])} fxRate={params.fxRate} />
+        <AddHoldingForm
+          onAdd={(h) => { setHoldings((prev) => [...prev, h]); setPendingNewAccountId(null); }}
+          fxRate={params.fxRate}
+          cashList={cashList}
+          pendingAccountId={pendingNewAccountId}
+          onRequestAccountPick={() => requestAccountPick("NEW")}
+          onClearAccountId={() => setPendingNewAccountId(null)}
+        />
       </div>
 
       <div style={{ padding: "0 16px 14px" }}>
@@ -3831,7 +3898,7 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
         <div ref={cashSectionRef}>
           {cashLink && cashLink.cashIdx === null && (
             <div style={{ fontSize: 11.5, color: INK, background: GOLD_SOFT, border: `1px solid ${GOLD}`, borderRadius: 4, padding: "6px 8px", marginBottom: 8 }}>
-              反映する現金口座をタップして選んでください。
+              {cashLink.mode === "account" ? "紐付ける現金口座をタップして選んでください。" : "反映する現金口座をタップして選んでください。"}
             </div>
           )}
           <Accordion title={`現金 — ${fmtCur(totalCash)}`} colorKey="living" open={cashOpen} onToggle={setCashOpen}>
@@ -3851,12 +3918,18 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
                   }}>
                     <DragHandle dragProps={cashDrag.bindHandle(i, cashList.map((_, k) => k))} active={cashDrag.dragKey === i} />
                     <span style={{ fontSize: 10.5, color: INK_SOFT, flexShrink: 0, minWidth: 26 }}>No.{pos + 1}</span>
-                    <input value={c.bank} onChange={(e) => updateCashField(i, "bank", e.target.value)} placeholder="口座名・メモ" disabled={picking}
-                      style={{ flex: 1, fontSize: 13, color: INK, border: "none", borderBottom: `1px dashed ${PAPER_LINE}`, background: "transparent", padding: "2px 2px" }} />
+                    <input value={c.bank} onChange={(e) => updateCashField(i, "bank", e.target.value)} placeholder="口座名・メモ" readOnly={picking}
+                      style={{
+                        flex: 1, fontSize: 13, color: picking ? INK_SOFT : INK, border: "none", borderBottom: `1px dashed ${PAPER_LINE}`,
+                        background: "transparent", padding: "2px 2px", pointerEvents: picking ? "none" : "auto",
+                      }} />
                     <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
                       <span style={{ fontSize: 12, color: INK_SOFT }}>¥</span>
-                      <CommaNumberInput value={c.amount} onChange={(v) => updateCash(i, v ?? 0)} disabled={picking}
-                        style={{ width: 100, textAlign: "right", fontSize: 13, padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
+                      <CommaNumberInput value={c.amount} onChange={(v) => updateCash(i, v ?? 0)} readOnly={picking}
+                        style={{
+                          width: 100, textAlign: "right", fontSize: 13, padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3,
+                          fontVariantNumeric: "tabular-nums", color: picking ? INK_SOFT : INK, pointerEvents: picking ? "none" : "auto",
+                        }} />
                     </div>
                     {!picking && (
                       <button onClick={() => deleteCash(i)} title="削除" style={{ border: "none", background: "transparent", color: SEAL, fontSize: 14, cursor: "pointer", padding: "0 2px" }}>×</button>
@@ -3882,6 +3955,7 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
                   <HoldingCard key={i} idx={i} h={holdings[i]} fxRate={params.fxRate} fmtCur={fmtCur}
                     cashList={cashList} cashLink={cashLink}
                     onRequestCashPick={requestCashPick} onApplyWithCash={applyTradeWithCash}
+                    onRequestAccountPick={requestAccountPick}
                     onCardRef={(idx, el) => { holdingRefs.current[idx] = el; }}
                     onUpdate={(patch) => updateHoldingPatch(i, patch)}
                     onDelete={() => deleteHolding(i)}
