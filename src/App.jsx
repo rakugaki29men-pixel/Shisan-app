@@ -3016,6 +3016,13 @@ const SUBCLASS_SUGGESTIONS = {
 function defaultAssetClassListState() { return [...ASSET_CLASSES]; }
 function defaultSubclassSuggestionsState() { return clone(SUBCLASS_SUGGESTIONS); }
 const TYPE_TAGS = ["個別銘柄", "ETF", "投信", "仮想通貨"];
+// 銘柄検索の種類しぼりこみ（S&P500のようにETFと投信の両方がヒットしうる場合に使う）
+const SEARCH_TYPE_OPTIONS = [
+  { label: "個別株", value: "EQUITY" },
+  { label: "ETF", value: "ETF" },
+  { label: "投信", value: "MUTUALFUND" },
+  { label: "仮想通貨", value: "CRYPTOCURRENCY" },
+];
 const THEME_TAGS = [
   "高配当", "連続増配", "低ボラ", "グロース", "バリュー", "AI関連", "ハイテク",
   "インフレ耐性", "ディフェンシブ", "コア資産", "サテライト資産", "積立中",
@@ -3134,6 +3141,8 @@ function AddHoldingForm({ onAdd, fxRate, cashList, pendingAccountId, onRequestAc
   const [priceNote, setPriceNote] = useState("");
   const [open, setOpen] = useState(false);
   const [reflectCashOnAdd, setReflectCashOnAdd] = useState(true);
+  const [typeFilter, setTypeFilter] = useState([]); // 空なら種類を絞らず全体から検索
+  const toggleTypeFilter = (v) => setTypeFilter((prev) => prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]);
 
   const search = async () => {
     if (!query.trim()) return;
@@ -3143,7 +3152,8 @@ function AddHoldingForm({ onAdd, fxRate, cashList, pendingAccountId, onRequestAc
     }
     setSearching(true); setError(""); setCandidates(null); setPicked(null);
     try {
-      const res = await fetchJson(`${PRICE_API_BASE}/search?q=${encodeURIComponent(query.trim())}`);
+      const typesParam = typeFilter.length ? `&types=${typeFilter.join(",")}` : "";
+      const res = await fetchJson(`${PRICE_API_BASE}/search?q=${encodeURIComponent(query.trim())}${typesParam}`);
       const list = Array.isArray(res?.candidates) ? res.candidates : [];
       if (list.length === 0) setError("見つかりませんでした。名称やティッカーを変えて試してください。");
       setCandidates(list);
@@ -3244,6 +3254,17 @@ function AddHoldingForm({ onAdd, fxRate, cashList, pendingAccountId, onRequestAc
       </div>
       {open && (
         <div style={{ marginTop: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+            <span style={{ fontSize: 10.5, color: INK_SOFT }}>検索対象：</span>
+            {SEARCH_TYPE_OPTIONS.map((o) => (
+              <button key={o.value} onClick={() => toggleTypeFilter(o.value)} style={{
+                fontSize: 10.5, padding: "3px 9px", borderRadius: 10, cursor: "pointer",
+                border: `1px solid ${typeFilter.includes(o.value) ? GOLD : PAPER_LINE}`,
+                background: typeFilter.includes(o.value) ? GOLD_SOFT : "#fff", color: INK,
+              }}>{o.label}</button>
+            ))}
+            {typeFilter.length === 0 && <span style={{ fontSize: 10, color: INK_SOFT }}>（未選択＝すべてから検索）</span>}
+          </div>
           <div style={{ display: "flex", gap: 6 }}>
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="例：Apple, AAPL, eMAXIS 先進国, ビットコイン"
               onKeyDown={(e) => e.key === "Enter" && search()}

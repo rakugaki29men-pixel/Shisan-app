@@ -12,7 +12,7 @@ yfinance（無料・APIキー不要）でYahoo Financeのデータを取得す�
       -> [{"symbol": "AAPL", "price": 123.45, "currency": "USD", "asOf": "2026-09-10"}, ...]
       見つからなかった銘柄は結果の配列から省かれる（投資信託など、そもそも
       Yahoo Financeにティッカーが存在しないものは常に省かれる）。
-  GET /search?q=<キーワード>
+  GET /search?q=<キーワード>&types=EQUITY,ETF,MUTUALFUND,CRYPTOCURRENCY (typesは省略可、省略時は全種類)
       -> {"candidates": [{"name", "exchange", "ticker", "instrumentType", "currency", "assetCat"}, ...]}
       銘柄名・ティッカーのあいまい検索。Yahoo Financeの検索候補をそのまま変換する。
   GET /names?symbols=1306.T,7203.T
@@ -177,11 +177,14 @@ def prices():
 @app.route("/search")
 def search():
     query = request.args.get("q", "").strip()
+    types_param = request.args.get("types", "")
+    wanted_types = {t.strip().upper() for t in types_param.split(",") if t.strip()}
     if not query:
         return jsonify({"candidates": []})
 
     try:
-        quotes = yf.Search(query, max_results=8).quotes
+        # 種類を絞る場合、目的の件数分残るよう多めに取得してからフィルタする
+        quotes = yf.Search(query, max_results=15 if wanted_types else 8).quotes
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -190,6 +193,8 @@ def search():
         symbol = q.get("symbol")
         quote_type = (q.get("quoteType") or "").upper()
         if not symbol or quote_type not in _QUOTE_TYPE_MAP:
+            continue
+        if wanted_types and quote_type not in wanted_types:
             continue
         exchange, ticker = _split_symbol(symbol, q.get("exchange"))
         name = q.get("longname") or q.get("shortname") or symbol
