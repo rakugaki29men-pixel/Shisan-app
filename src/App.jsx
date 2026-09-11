@@ -3477,6 +3477,13 @@ function HoldingCard({ h, idx, onUpdate, onDelete, fxRate, fmtCur = fmtYen, cash
                 style={{ width: 92, textAlign: "right", padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
             </label>
             <label style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              {h.qtyMode === "nav10000" ? "基準価額(¥/1万口)" : h.currency === "USD" ? "単価($)" : "単価(¥)"}
+              <CommaNumberInput
+                value={h.qtyMode === "nav10000" || h.currency !== "USD" ? h.priceJpyUnit : h.priceUsdUnit}
+                onChange={(v) => onUpdate(h.qtyMode === "nav10000" || h.currency !== "USD" ? { priceJpyUnit: v ?? 0 } : { priceUsdUnit: v ?? 0 })}
+                style={{ width: 92, textAlign: "right", padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               取得額(¥)
               <CommaNumberInput value={h.avgJpyTotal} onChange={(v) => onUpdate({ avgJpyTotal: v ?? 0 })}
                 style={{ width: 92, textAlign: "right", padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
