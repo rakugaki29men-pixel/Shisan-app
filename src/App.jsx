@@ -474,6 +474,7 @@ function defaultParamsState() {
     fxRate: RAW.portfolio.usdjpy || 150,
     fxRates: { USD: RAW.portfolio.usdjpy || 150 },
     reinvestDividends: false,
+    securitiesActualOverrides: {}, // { [year]: 万円 } - ポートフォリオから転記した実績値。その年からその値を起点に再計算する
     simStartYear: RAW.sim.years[0],
     wageGrowthRate: 0,
     downPayment: 0,
@@ -868,6 +869,9 @@ function computeModel(sim, params) {
         securities[i] = secPrev * params.growthRate + reinvested;
       }
     }
+    // ポートフォリオから実績を転記した年は、その値を起点に以降の年を再計算する
+    const override = params.securitiesActualOverrides?.[YEARS[i]];
+    if (override !== undefined && override !== null) securities[i] = override;
     assetTotal[i] = securities[i] + cash[i] + realEstateAsset[i];
   }
 
@@ -2922,6 +2926,11 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
             { label: "現金", arr: model.cash },
             { label: "金融資産 合計", arr: model.securities },
           ]} />
+          {Object.keys(params.securitiesActualOverrides || {}).length > 0 && (
+            <div style={{ fontSize: 10.5, color: INK_SOFT, marginTop: 8 }}>
+              ポートフォリオから転記済みの年：{Object.entries(params.securitiesActualOverrides).sort(([a], [b]) => a - b).map(([y, v]) => `${y}年(${fmt(v)}万円)`).join("、")}
+            </div>
+          )}
         </Accordion>
       </div>
     </div>
@@ -3960,11 +3969,29 @@ function ClassManagerModal({ assetClassList, setAssetClassList, subclassSuggesti
   );
 }
 
-function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, setParams, asOfDate, setAsOfDate, assetClassList, setAssetClassList, subclassSuggestions, setSubclassSuggestions }) {
+function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, setParams, sim, asOfDate, setAsOfDate, assetClassList, setAssetClassList, subclassSuggestions, setSubclassSuggestions }) {
   const totalCash = cashList.reduce((s, c) => s + (c.amount || 0), 0);
   const totalValue = holdings.reduce((s, h) => s + (h.valueJpy || 0), 0) + totalCash;
   const totalCost = holdings.reduce((s, h) => s + (h.avgJpyTotal || 0), 0);
   const totalPl = holdings.reduce((s, h) => s + ((h.valueJpy || 0) - (h.avgJpyTotal || 0)), 0);
+
+  // シミュレーションへの転記（現金以外の保有資産の合計を、指定年の金融資産としてシミュレーションに書き込む）
+  const simModel = useMemo(() => computeModel(sim, params), [sim, params]);
+  const anchorYear = parseInt((asOfDate || "").slice(0, 4), 10) || new Date().getFullYear();
+  const [transcribeYear, setTranscribeYear] = useState(Math.min(Math.max(anchorYear, YEARS[0]), YEARS[N - 1]));
+  const transcribeYearIdx = transcribeYear - YEARS[0];
+  const transcribeInRange = transcribeYearIdx >= 0 && transcribeYearIdx < N;
+  const nonCashTotalMan = Math.round((holdings.reduce((s, h) => s + (h.valueJpy || 0), 0) / 10000) * 10) / 10;
+  const transcribeBeforeMan = transcribeInRange ? Math.round(simModel.securities[transcribeYearIdx] * 10) / 10 : 0;
+  const postToSimulation = () => {
+    if (!transcribeInRange) return;
+    const ok = window.confirm(`${transcribeYear}年の金融資産（現金以外の保有資産合計）をシミュレーションに転記します。\n${fmt(transcribeBeforeMan)} → ${fmt(nonCashTotalMan)} 万円\n\nよろしいですか？`);
+    if (!ok) return;
+    setParams((p) => ({
+      ...p,
+      securitiesActualOverrides: { ...(p.securitiesActualOverrides || {}), [transcribeYear]: nonCashTotalMan },
+    }));
+  };
 
   // 保有銘柄・現金の編集用の元に戻す・やり直す（最大5件、このタブでの編集のみが対象。価格の自動取得も含む）
   const [undoStack, setUndoStack] = useState([]);
@@ -4252,6 +4279,32 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
           <div style={{ fontSize: 10.5, color: INK_SOFT, marginTop: 6 }}>
             ※ 投資信託は元データの保有口数が不明なため、現在の評価額と基準価額から口数を逆算して概算しています（正確な口数ではありません）。過去日付の価格は取得先データの都合上、実際の終値・基準価額と多少ずれる場合があります。
           </div>
+        </div>
+      </div>
+
+      <div style={{ padding: "0 16px 14px" }}>
+        <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 12 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: INK, marginBottom: 6 }}>シミュレーションに転記</div>
+          <div style={{ fontSize: 11, color: INK_SOFT, marginBottom: 8 }}>
+            現金を除く保有資産の合計額を、指定した年の金融資産としてシミュレーションに書き込みます。その年以降は、この金額を起点に成長率などで再計算されます。
+          </div>
+          <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+            対象年
+            <input type="number" value={transcribeYear} onChange={(e) => setTranscribeYear(parseInt(e.target.value, 10) || transcribeYear)}
+              style={{ width: 80, padding: "5px 7px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4 }} />
+          </label>
+          {!transcribeInRange ? (
+            <div style={{ fontSize: 11.5, color: SEAL }}>{transcribeYear}年はシミュレーションの期間（{YEARS[0]}〜{YEARS[N - 1]}年）の外なので転記できません。</div>
+          ) : (
+            <>
+              <div style={{ fontSize: 11, color: INK_SOFT, marginBottom: 8 }}>
+                金融資産（現金以外の保有資産合計）：{fmt(transcribeBeforeMan)} → {fmt(nonCashTotalMan)} 万円
+              </div>
+              <button onClick={postToSimulation} style={{
+                fontSize: 12, padding: "8px 14px", borderRadius: 4, border: "none", background: GOLD, color: "#fff", cursor: "pointer",
+              }}>{transcribeYear}年の金融資産として転記する</button>
+            </>
+          )}
         </div>
       </div>
 
@@ -5291,7 +5344,7 @@ export default function App() {
       />
 
       {tab === "sim" && <SimulationTab sim={sim} setSim={setSim} params={params} setParams={setParams} scenario={scenario} setScenario={setScenario} holdings={holdings} onOpenWizard={openCostWizard} onOpenSheet={() => setShowSheet(true)} />}
-      {tab === "portfolio" && <PortfolioTab holdings={holdings} setHoldings={setHoldings} cashList={cashList} setCashList={setCashList} params={params} setParams={setParams} asOfDate={asOfDate} setAsOfDate={setAsOfDate} assetClassList={assetClassList} setAssetClassList={setAssetClassList} subclassSuggestions={subclassSuggestions} setSubclassSuggestions={setSubclassSuggestions} />}
+      {tab === "portfolio" && <PortfolioTab holdings={holdings} setHoldings={setHoldings} cashList={cashList} setCashList={setCashList} params={params} setParams={setParams} sim={sim} asOfDate={asOfDate} setAsOfDate={setAsOfDate} assetClassList={assetClassList} setAssetClassList={setAssetClassList} subclassSuggestions={subclassSuggestions} setSubclassSuggestions={setSubclassSuggestions} />}
       {tab === "aggregate" && <AggregationTab holdings={holdings} cashList={cashList} sim={sim} params={params} setParams={setParams} asOfDate={asOfDate} portfolioLogs={portfolioLogs} setPortfolioLogs={setPortfolioLogs} />}
       {showSheet && (
         <div style={{ position: "fixed", inset: 0, background: PAPER, zIndex: 200, overflowY: "auto", fontFamily: "'Noto Sans JP','Hiragino Sans',sans-serif" }}>
