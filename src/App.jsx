@@ -3944,9 +3944,14 @@ function renderPieLeaderLabel(colors) {
   };
 }
 
-function AggregationTab({ holdings, cashList, asOfDate, portfolioLogs, setPortfolioLogs }) {
+const ESTIMATE_LOG_ID = "__ESTIMATE__";
+
+function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, portfolioLogs, setPortfolioLogs }) {
   const totalCash = cashList.reduce((s, c) => s + (c.amount || 0), 0);
   const todayStr = new Date().toISOString().slice(0, 10);
+  const model = useMemo(() => computeModel(sim, params), [sim, params]);
+  const anchorYear = parseInt((asOfDate || "").slice(0, 4), 10) || new Date().getFullYear();
+  const currentIdx = Math.min(Math.max(anchorYear - YEARS[0], 0), N - 1);
 
   // 「現在」時点：実際の保有ポートフォリオから内訳を作る
   const subMapNow = {};
@@ -3964,15 +3969,36 @@ function AggregationTab({ holdings, cashList, asOfDate, portfolioLogs, setPortfo
   const nowCurrencyMap = {};
   holdings.forEach((h) => { const cur = h.currency || "円建"; nowCurrencyMap[cur] = (nowCurrencyMap[cur] || 0) + (h.valueJpy || 0); });
   nowCurrencyMap["円建"] = (nowCurrencyMap["円建"] || 0) + totalCash;
+  const subWeights = Object.fromEntries(
+    Object.entries(subMapNow).map(([k, v]) => [k, securitiesLikeTotalNow > 0 ? v / securitiesLikeTotalNow : 0])
+  );
 
   const [selectedLogId, setSelectedLogId] = useState(null);
-  const selectedLog = selectedLogId ? portfolioLogs.find((l) => l.id === selectedLogId) : null;
-  const isNow = !selectedLog;
+  const [estYearIdx, setEstYearIdx] = useState(currentIdx);
+  const isEstimate = selectedLogId === ESTIMATE_LOG_ID;
+  const selectedLog = (selectedLogId && !isEstimate) ? portfolioLogs.find((l) => l.id === selectedLogId) : null;
+  const isNow = !selectedLog && !isEstimate;
 
-  const subRows = isNow ? nowSubRows : selectedLog.subRows;
-  const total = isNow ? nowTotal : selectedLog.total;
-  const cashPortion = isNow ? totalCash : selectedLog.cashPortion;
-  const currencyMap = isNow ? nowCurrencyMap : (selectedLog.currencyMap || {});
+  let subRows, total, cashPortion, currencyMap;
+  if (isEstimate) {
+    // シミュレーション結果に、現在の資産配分比率を当てはめた推計値
+    // （シミュレーションの数値は万円単位のため、円単位に合わせるために×10,000する）
+    const secVal = model.securities[estYearIdx] * 10000;
+    const cashVal = model.cash[estYearIdx] * 10000;
+    const reVal = model.realEstateAsset[estYearIdx] * 10000;
+    const map = {};
+    Object.entries(subWeights).forEach(([k, w]) => { if (w > 0) map[k] = w * secVal; });
+    if (cashVal > 0) map["現金 / 現金"] = cashVal;
+    if (reVal > 0) map["不動産 / 自宅"] = reVal;
+    subRows = Object.entries(map).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+    total = secVal + cashVal + reVal;
+    cashPortion = cashVal;
+    currencyMap = {};
+  } else if (isNow) {
+    subRows = nowSubRows; total = nowTotal; cashPortion = totalCash; currencyMap = nowCurrencyMap;
+  } else {
+    subRows = selectedLog.subRows; total = selectedLog.total; cashPortion = selectedLog.cashPortion; currencyMap = selectedLog.currencyMap || {};
+  }
 
   const [recording, setRecording] = useState(false);
   const [labelInput, setLabelInput] = useState("");
@@ -3995,17 +4021,16 @@ function AggregationTab({ holdings, cashList, asOfDate, portfolioLogs, setPortfo
   };
   const sortedLogs = [...portfolioLogs].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
 
-  // アセットクラスの合計が大きい順にグループ化し、同じクラスの扇形が隣り合うようにする
-  // （クラス内はサブクラスの大きい順）。色はクラス単位で塗り、境界線でサブクラスを見分ける。
-  const pieRows = subRows.map(([k, v]) => {
+  // 円グラフはアセットクラス単位（サブクラスは内訳明細のみで見せる）
+  const catMap = {};
+  subRows.forEach(([k, v]) => {
     const sepIdx = k.indexOf(" / ");
     const cat = sepIdx >= 0 ? k.slice(0, sepIdx) : k;
-    return { name: k, value: Math.round(v), cat };
+    catMap[cat] = (catMap[cat] || 0) + v;
   });
-  const catTotals = {};
-  pieRows.forEach((r) => { catTotals[r.cat] = (catTotals[r.cat] || 0) + r.value; });
-  pieRows.sort((a, b) => (catTotals[b.cat] - catTotals[a.cat]) || (b.value - a.value));
-  const pieData = pieRows;
+  const pieData = Object.entries(catMap)
+    .map(([cat, v]) => ({ name: cat, value: Math.round(v), cat }))
+    .sort((a, b) => b.value - a.value);
   const pieColors = pieData.map((r) => colorForAssetCat(r.cat));
   const colorForKey = (k) => {
     const sepIdx = k.indexOf(" / ");
@@ -4015,7 +4040,9 @@ function AggregationTab({ holdings, cashList, asOfDate, portfolioLogs, setPortfo
   return (
     <div style={{ paddingBottom: 40 }}>
       <SectionHeader title="資産集計" sub={
-        isNow ? `${asOfDate} 時点の保有ポートフォリオ・現金の内訳` : `記録「${selectedLog.label}」（${selectedLog.createdAt}保存）の内訳`
+        isNow ? `${asOfDate} 時点の保有ポートフォリオ・現金の内訳` :
+        isEstimate ? `試算：${YEARS[estYearIdx]}年の資産配分（現在の保有比率をシミュレーション結果に適用した推計）` :
+        `記録「${selectedLog.label}」（${selectedLog.createdAt}保存）の内訳`
       } />
 
       <div style={{ padding: "0 16px 6px" }}>
@@ -4025,6 +4052,7 @@ function AggregationTab({ holdings, cashList, asOfDate, portfolioLogs, setPortfo
               style={{ fontSize: 13, padding: "6px 8px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, flex: 1, minWidth: 140 }}>
               <option value="">現在</option>
               {sortedLogs.map((l) => <option key={l.id} value={l.id}>{l.label}（{l.createdAt}）</option>)}
+              <option value={ESTIMATE_LOG_ID}>将来の試算（年を選ぶ）</option>
             </select>
             {!isNow && (
               <button onClick={() => setSelectedLogId(null)} style={{
@@ -4032,6 +4060,21 @@ function AggregationTab({ holdings, cashList, asOfDate, portfolioLogs, setPortfo
               }}>現在に戻る</button>
             )}
           </div>
+          {isEstimate && (
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${PAPER_LINE}` }}>
+              <input
+                type="range" min={currentIdx} max={N - 1} step={1} value={estYearIdx}
+                onChange={(e) => setEstYearIdx(parseInt(e.target.value, 10))}
+                style={{ width: "100%", accentColor: GOLD }}
+              />
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: INK_SOFT, marginTop: 2, marginBottom: 8 }}>
+                <span>{YEARS[currentIdx]}年</span>
+                <span style={{ fontFamily: "'Shippori Mincho','Noto Serif JP',serif", fontSize: 16, color: INK }}>{YEARS[estYearIdx]}年</span>
+                <span>{YEARS[N - 1]}年</span>
+              </div>
+              <RealEstateToggle params={params} setParams={setParams} />
+            </div>
+          )}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
             {!recording ? (
               <button onClick={startRecording} style={{
@@ -4050,7 +4093,7 @@ function AggregationTab({ holdings, cashList, asOfDate, portfolioLogs, setPortfo
                 }}>キャンセル</button>
               </>
             )}
-            {!isNow && !recording && (
+            {selectedLog && !recording && (
               <button onClick={() => deleteLog(selectedLogId)} style={{
                 fontSize: 11.5, padding: "6px 12px", borderRadius: 4, border: `1px solid ${SEAL}`, background: "transparent", color: SEAL, cursor: "pointer",
               }}>この記録を削除</button>
@@ -4122,20 +4165,24 @@ function AggregationTab({ holdings, cashList, asOfDate, portfolioLogs, setPortfo
         </div>
       </div>
 
-      <SectionHeader title="通貨別内訳" />
-      <div style={{ padding: "0 16px" }}>
-        <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 5, overflow: "hidden", background: CARD }}>
-          {Object.entries(currencyMap).filter(([, v]) => v > 0).map(([k, v], i, arr) => (
-            <div key={k} style={{
-              display: "flex", justifyContent: "space-between", padding: "8px 12px",
-              borderBottom: i < arr.length - 1 ? `1px solid ${PAPER_LINE}` : "none", fontSize: 12.5,
-            }}>
-              <span style={{ color: INK }}>{k}</span>
-              <span style={{ fontWeight: 600, color: INK, fontVariantNumeric: "tabular-nums" }}>{fmtYen(v)}</span>
+      {Object.values(currencyMap).some((v) => v > 0) && (
+        <>
+          <SectionHeader title="通貨別内訳" />
+          <div style={{ padding: "0 16px" }}>
+            <div style={{ border: `1px solid ${PAPER_LINE}`, borderRadius: 5, overflow: "hidden", background: CARD }}>
+              {Object.entries(currencyMap).filter(([, v]) => v > 0).map(([k, v], i, arr) => (
+                <div key={k} style={{
+                  display: "flex", justifyContent: "space-between", padding: "8px 12px",
+                  borderBottom: i < arr.length - 1 ? `1px solid ${PAPER_LINE}` : "none", fontSize: 12.5,
+                }}>
+                  <span style={{ color: INK }}>{k}</span>
+                  <span style={{ fontWeight: 600, color: INK, fontVariantNumeric: "tabular-nums" }}>{fmtYen(v)}</span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -4797,7 +4844,7 @@ export default function App() {
 
       {tab === "sim" && <SimulationTab sim={sim} setSim={setSim} params={params} setParams={setParams} scenario={scenario} setScenario={setScenario} onOpenWizard={openCostWizard} onOpenSheet={() => setShowSheet(true)} />}
       {tab === "portfolio" && <PortfolioTab holdings={holdings} setHoldings={setHoldings} cashList={cashList} setCashList={setCashList} params={params} setParams={setParams} asOfDate={asOfDate} setAsOfDate={setAsOfDate} />}
-      {tab === "aggregate" && <AggregationTab holdings={holdings} cashList={cashList} asOfDate={asOfDate} portfolioLogs={portfolioLogs} setPortfolioLogs={setPortfolioLogs} />}
+      {tab === "aggregate" && <AggregationTab holdings={holdings} cashList={cashList} sim={sim} params={params} setParams={setParams} asOfDate={asOfDate} portfolioLogs={portfolioLogs} setPortfolioLogs={setPortfolioLogs} />}
       {showSheet && (
         <div style={{ position: "fixed", inset: 0, background: PAPER, zIndex: 200, overflowY: "auto", fontFamily: "'Noto Sans JP','Hiragino Sans',sans-serif" }}>
           <div style={{ background: INK, color: PAPER, padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", position: "sticky", top: 0, zIndex: 6 }}>
