@@ -16,6 +16,7 @@ yfinance（無料・APIキー不要）でYahoo Financeのデータを取得す�
       -> {"candidates": [{"name", "exchange", "ticker", "instrumentType", "currency", "assetCat"}, ...]}
       銘柄名・ティッカーのあいまい検索。Yahoo Financeの検索候補をそのまま変換する。
 """
+import math
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
@@ -39,6 +40,22 @@ def _date_range_around(date_str):
 
 def _currency_for(symbol):
     return "JPY" if symbol.upper().endswith(".T") else "USD"
+
+
+def _last_valid_close(hist):
+    # auto_adjust=Falseでも配当・分割データ取得に失敗した行はCloseがNaNになることがあるため、
+    # 直近の有効な値まで遡って拾う
+    closes = hist["Close"].dropna()
+    if closes.empty:
+        return None, None
+    return float(closes.iloc[-1]), closes.index[-1].strftime("%Y-%m-%d")
+
+
+def _first_valid_close(hist):
+    closes = hist["Close"].dropna()
+    if closes.empty:
+        return None, None
+    return float(closes.iloc[0]), closes.index[0].strftime("%Y-%m-%d")
 
 
 _EXCHANGE_MAP = {
@@ -84,18 +101,14 @@ def fx():
         ticker = yf.Ticker("JPY=X")
         if date_str:
             start, end = _date_range_around(date_str)
-            hist = ticker.history(start=start, end=end)
-            if hist.empty:
-                return jsonify({"error": "no data for that date"}), 404
-            row = hist.iloc[0]
-            used_date = hist.index[0].strftime("%Y-%m-%d")
+            hist = ticker.history(start=start, end=end, auto_adjust=False)
+            price, used_date = _first_valid_close(hist)
         else:
-            hist = ticker.history(period="5d")
-            if hist.empty:
-                return jsonify({"error": "no data"}), 404
-            row = hist.iloc[-1]
-            used_date = hist.index[-1].strftime("%Y-%m-%d")
-        return jsonify({"usdjpy": round(float(row["Close"]), 4), "date": used_date})
+            hist = ticker.history(period="5d", auto_adjust=False)
+            price, used_date = _last_valid_close(hist)
+        if price is None:
+            return jsonify({"error": "no data"}), 404
+        return jsonify({"usdjpy": round(price, 4), "date": used_date})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -105,17 +118,13 @@ def _fetch_one_price(symbol, date_str):
         ticker = yf.Ticker(symbol)
         if date_str:
             start, end = _date_range_around(date_str)
-            hist = ticker.history(start=start, end=end)
-            if hist.empty:
-                return None
-            price = float(hist.iloc[0]["Close"])
-            as_of = hist.index[0].strftime("%Y-%m-%d")
+            hist = ticker.history(start=start, end=end, auto_adjust=False)
+            price, as_of = _first_valid_close(hist)
         else:
-            hist = ticker.history(period="5d")
-            if hist.empty:
-                return None
-            price = float(hist.iloc[-1]["Close"])
-            as_of = hist.index[-1].strftime("%Y-%m-%d")
+            hist = ticker.history(period="5d", auto_adjust=False)
+            price, as_of = _last_valid_close(hist)
+        if price is None or math.isnan(price):
+            return None
         return {
             "symbol": symbol,
             "price": round(price, 4),
