@@ -277,6 +277,8 @@ function migrateLoadedState(parsed) {
     holdings: parsed.holdings ? migrateHoldingFields(parsed.holdings) : null,
     cashList: parsed.cashList ? migrateCashIds(parsed.cashList) : null,
     portfolioLogs: parsed.portfolioLogs || null,
+    assetClassList: parsed.assetClassList || null,
+    subclassSuggestions: parsed.subclassSuggestions || null,
     family: parsed.family || null,
     ledger: parsed.ledger ? migrateLedgerLinks({ ...defaultLedgerState(), ...parsed.ledger }) : null,
     scenario: parsed.scenario ? { ...defaultScenarioState(), ...parsed.scenario } : null,
@@ -288,6 +290,8 @@ function applyMigratedState(migrated, setters) {
   if (migrated.holdings) setters.setHoldings(migrated.holdings);
   if (migrated.cashList) setters.setCashList(migrated.cashList);
   if (migrated.portfolioLogs) setters.setPortfolioLogs(migrated.portfolioLogs);
+  if (migrated.assetClassList) setters.setAssetClassList(migrated.assetClassList);
+  if (migrated.subclassSuggestions) setters.setSubclassSuggestions(migrated.subclassSuggestions);
   if (migrated.family) setters.setFamily(migrated.family);
   if (migrated.ledger) setters.setLedger(migrated.ledger);
   if (migrated.scenario) setters.setScenario(migrated.scenario);
@@ -2199,6 +2203,19 @@ function SettingsModal({ sim, setSim, params, setParams, onOpenFamily, onOpenWiz
   );
 }
 
+// スマホの共有シート（LINE・メールなど）を呼び出す。非対応環境ではクリップボードにコピーする
+async function shareInviteCode(code) {
+  const text = `ライフポートフォリオに招待します！\n招待コード：${code}\n${window.location.origin}`;
+  if (navigator.share) {
+    try { await navigator.share({ text }); } catch (e) { /* ユーザーによるキャンセル等は無視 */ }
+    return;
+  }
+  if (navigator.clipboard) {
+    try { await navigator.clipboard.writeText(text); window.alert("招待コードをコピーしました。"); return; } catch (e) { /* fall through */ }
+  }
+  window.prompt("この内容をコピーしてください：", text);
+}
+
 function ShareModal({ authLoading, user, householdId, householdInfo, onHouseholdIdChange, onClose }) {
   const [mode, setMode] = useState("signin"); // "signin" | "signup"
   const [email, setEmail] = useState("");
@@ -2301,7 +2318,8 @@ function ShareModal({ authLoading, user, householdId, householdInfo, onHousehold
               {createdCode ? (
                 <div style={{ background: GOLD_SOFT, border: `1px solid ${GOLD}`, borderRadius: 5, padding: 14, textAlign: "center" }}>
                   <div style={{ fontSize: 11.5, color: INK_SOFT, marginBottom: 6 }}>世帯を作成しました。この招待コードを共有したい相手に伝えてください。</div>
-                  <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: "0.15em", color: INK, fontVariantNumeric: "tabular-nums" }}>{createdCode}</div>
+                  <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: "0.15em", color: INK, fontVariantNumeric: "tabular-nums", marginBottom: 10 }}>{createdCode}</div>
+                  <button onClick={() => shareInviteCode(createdCode)} style={{ ...settingsBtnStyle, border: `1px solid ${GOLD}`, background: "#fff", margin: "0 auto" }}>📤 招待コードを共有する</button>
                 </div>
               ) : (
                 <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 12 }}>
@@ -2331,8 +2349,9 @@ function ShareModal({ authLoading, user, householdId, householdInfo, onHousehold
               <div style={{ fontSize: 12.5, color: INK, marginBottom: 4 }}>✓ この世帯のデータをリアルタイムで共有しています</div>
               <div style={{ fontSize: 11, color: INK_SOFT }}>メンバー数：{householdInfo?.members?.length ?? "-"}人</div>
               {householdInfo?.inviteCode && (
-                <div style={{ fontSize: 11, color: INK_SOFT, marginTop: 4 }}>
-                  招待コード：<b style={{ fontVariantNumeric: "tabular-nums", letterSpacing: "0.1em" }}>{householdInfo.inviteCode}</b>（他のメンバーを招待するときに使えます）
+                <div style={{ fontSize: 11, color: INK_SOFT, marginTop: 4, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span>招待コード：<b style={{ fontVariantNumeric: "tabular-nums", letterSpacing: "0.1em" }}>{householdInfo.inviteCode}</b>（他のメンバーを招待するときに使えます）</span>
+                  <button onClick={() => shareInviteCode(householdInfo.inviteCode)} style={{ fontSize: 10.5, padding: "3px 9px", borderRadius: 10, border: `1px solid ${PAPER_LINE}`, background: "#fff", color: INK, cursor: "pointer" }}>📤 共有</button>
                 </div>
               )}
             </div>
@@ -2992,6 +3011,10 @@ const SUBCLASS_SUGGESTIONS = {
   "仮想通貨": ["ビットコイン", "アルトコイン", "ステーブルコイン"],
   "不動産": ["自宅", "投資用不動産", "REIT"],
 };
+// ユーザーが資産クラス・サブクラス候補を追加削除できるよう、これらは初期値のみ
+// 上のASSET_CLASSES/SUBCLASS_SUGGESTIONSから作り、実体はApp()内でstateとして持つ
+function defaultAssetClassListState() { return [...ASSET_CLASSES]; }
+function defaultSubclassSuggestionsState() { return clone(SUBCLASS_SUGGESTIONS); }
 const TYPE_TAGS = ["個別銘柄", "ETF", "投信", "仮想通貨"];
 const THEME_TAGS = [
   "高配当", "連続増配", "低ボラ", "グロース", "バリュー", "AI関連", "ハイテク",
@@ -3084,21 +3107,22 @@ function TagChipsEditable({ tags, onChange, suggestions = TAG_SUGGESTIONS }) {
   );
 }
 
-function SubClassField({ assetCat, value, onChange }) {
+function SubClassField({ assetCat, value, onChange, suggestions }) {
   const listId = "subclass-suggestions";
+  const list = suggestions ?? (SUBCLASS_SUGGESTIONS[assetCat] || []);
   return (
     <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 3 }}>
       サブクラス
       <input list={listId} value={value || ""} onChange={(e) => onChange(e.target.value || null)}
         placeholder="例：米国株式" style={{ fontSize: 12, padding: "5px 6px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, width: 130 }} />
       <datalist id={listId}>
-        {(SUBCLASS_SUGGESTIONS[assetCat] || []).map((s) => <option key={s} value={s} />)}
+        {list.map((s) => <option key={s} value={s} />)}
       </datalist>
     </label>
   );
 }
 
-function AddHoldingForm({ onAdd, fxRate, cashList, pendingAccountId, onRequestAccountPick, onClearAccountId }) {
+function AddHoldingForm({ onAdd, fxRate, cashList, pendingAccountId, onRequestAccountPick, onClearAccountId, assetClassList, subclassSuggestions, onOpenClassManager }) {
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [candidates, setCandidates] = useState(null);
@@ -3251,9 +3275,16 @@ function AddHoldingForm({ onAdd, fxRate, cashList, pendingAccountId, onRequestAc
           )}
           {picked && (
             <div style={{ marginTop: 10, border: `1px solid ${GOLD}`, borderRadius: 4, padding: 10, background: GOLD_SOFT }}>
-              <div style={{ fontSize: 12.5, fontWeight: 600, color: INK, marginBottom: 8 }}>{picked.name}</div>
+              <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 3, marginBottom: 8 }}>
+                銘柄名
+                <input value={picked.name} onChange={(e) => setPicked((p) => ({ ...p, name: e.target.value }))}
+                  style={{ fontSize: 12.5, fontWeight: 600, padding: "5px 6px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, background: "#fff" }} />
+              </label>
 
-              <div style={{ fontSize: 10.5, color: INK_SOFT, marginBottom: 4 }}>属性（検索結果から自動判定・編集可）</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <div style={{ fontSize: 10.5, color: INK_SOFT }}>属性（検索結果から自動判定・編集可）</div>
+                <button onClick={onOpenClassManager} title="資産クラス・サブクラスを編集" style={{ fontSize: 10.5, padding: "1px 7px", borderRadius: 10, border: `1px solid ${PAPER_LINE}`, background: "#fff", color: INK_SOFT, cursor: "pointer" }}>🔧</button>
+              </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
                 <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 3 }}>
                   資産クラス
@@ -3265,10 +3296,11 @@ function AddHoldingForm({ onAdd, fxRate, cashList, pendingAccountId, onRequestAc
                       return { ...p, assetCat: nextCat, tags: merged };
                     });
                   }} style={selectStyle}>
-                    {ASSET_CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
+                    {assetClassList.map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </label>
-                <SubClassField assetCat={picked.assetCat} value={picked.subClass} onChange={(v) => setPicked((p) => ({ ...p, subClass: v }))} />
+                <SubClassField assetCat={picked.assetCat} value={picked.subClass} onChange={(v) => setPicked((p) => ({ ...p, subClass: v }))}
+                  suggestions={subclassSuggestions[picked.assetCat] || []} />
                 <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 3 }}>
                   通貨
                   <select value={picked.currency} onChange={(e) => setPicked((p) => ({ ...p, currency: e.target.value }))} style={selectStyle}>
@@ -3355,14 +3387,18 @@ function TradeForm({ kind, idx, h, fxRate, cashList, cashLink, onRequestCashPick
   const currentQty = isFund ? (h.unitsImplied || 0) : (h.qty || 0);
   const [qtyInput, setQtyInput] = useState("");
   const [priceInput, setPriceInput] = useState("");
-  const [reflectCash, setReflectCash] = useState(false);
+  const linkedCashIdx = h.linkedCashId ? cashList.findIndex((c) => c.id === h.linkedCashId) : -1;
+  const [reflectCash, setReflectCash] = useState(linkedCashIdx >= 0);
   const fx = h.currency === "ドル建" ? (fxRate || 150) : 1;
   const qty = parseFloat(qtyInput) || 0;
   const amountJpy = isFund ? (qty / 10000) * (parseFloat(priceInput) || 0) : qty * (parseFloat(priceInput) || 0) * fx;
 
   const isLinkedHere = cashLink && cashLink.mode === "trade" && cashLink.holdingIdx === idx;
-  const selectedCashIdx = isLinkedHere ? cashLink.cashIdx : null;
+  // 銘柄に口座が紐付け済みならそれを既定にし、都度タップして選び直す必要をなくす
+  // （「変更」で選び直した場合はそちらを優先する）
+  const selectedCashIdx = isLinkedHere ? cashLink.cashIdx : (linkedCashIdx >= 0 ? linkedCashIdx : null);
   const selectedCashRow = selectedCashIdx != null ? cashList[selectedCashIdx] : null;
+  const isAutoLinked = !isLinkedHere && linkedCashIdx >= 0;
 
   const apply = () => {
     if (!qty) return;
@@ -3379,7 +3415,7 @@ function TradeForm({ kind, idx, h, fxRate, cashList, cashLink, onRequestCashPick
       if (isFund) patch.unitsImplied = Math.max(0, currentQty - qty); else patch.qty = Math.max(0, currentQty - qty);
     }
     const cashDelta = reflectCash && selectedCashIdx != null ? (kind === "buy" ? -amountJpy : amountJpy) : 0;
-    onApplyWithCash(idx, patch, cashDelta);
+    onApplyWithCash(idx, patch, cashDelta, reflectCash ? selectedCashIdx : null);
   };
 
   const canApply = qty > 0 && (!reflectCash || selectedCashIdx != null);
@@ -3412,7 +3448,7 @@ function TradeForm({ kind, idx, h, fxRate, cashList, cashLink, onRequestCashPick
         <div style={{ marginTop: 6 }}>
           {selectedCashRow ? (
             <div style={{ fontSize: 11, color: INK }}>
-              選択中の口座：<b>No.{selectedCashIdx + 1}</b>{selectedCashRow.bank ? `（${selectedCashRow.bank}）` : ""}
+              {isAutoLinked ? "紐付け済みの口座：" : "選択中の口座："}<b>{selectedCashRow.bank || `No.${selectedCashIdx + 1}`}</b>
               <button onClick={() => onRequestCashPick(idx)} style={{ marginLeft: 8, fontSize: 10.5, padding: "2px 8px", borderRadius: 10, border: `1px solid ${PAPER_LINE}`, background: "#fff", color: INK_SOFT, cursor: "pointer" }}>変更</button>
             </div>
           ) : (
@@ -3433,7 +3469,7 @@ function TradeForm({ kind, idx, h, fxRate, cashList, cashLink, onRequestCashPick
   );
 }
 
-function HoldingCard({ h, idx, onUpdate, onDelete, fxRate, fmtCur = fmtYen, cashList, cashLink, onRequestCashPick, onApplyWithCash, onRequestAccountPick, onCardRef, dragHandleProps, isDragging, setDragRef }) {
+function HoldingCard({ h, idx, onUpdate, onDelete, fxRate, fmtCur = fmtYen, cashList, cashLink, onRequestCashPick, onApplyWithCash, onRequestAccountPick, assetClassList, subclassSuggestions, onOpenClassManager, onCardRef, dragHandleProps, isDragging, setDragRef }) {
   const [expanded, setExpanded] = useState(false);
   const [tradeOpen, setTradeOpen] = useState(null); // null | "buy" | "sell"
   const pl = (h.valueJpy || 0) - (h.avgJpyTotal || 0);
@@ -3476,7 +3512,7 @@ function HoldingCard({ h, idx, onUpdate, onDelete, fxRate, fmtCur = fmtYen, cash
         </button>
       </div>
       {expanded && (
-        <div style={{ padding: 10, borderTop: `1px solid ${PAPER_LINE}`, background: CARD }}>
+        <div style={{ padding: 10, borderTop: `1px solid ${GOLD}`, background: GOLD_SOFT }}>
           {h.memo && (
             <div style={{ fontSize: 10.5, color: INK_SOFT, fontStyle: "italic", marginBottom: 8 }}>{h.memo}</div>
           )}
@@ -3501,15 +3537,19 @@ function HoldingCard({ h, idx, onUpdate, onDelete, fxRate, fmtCur = fmtYen, cash
               </button>
             )}
           </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 4 }}>
+            <button onClick={onOpenClassManager} title="資産クラス・サブクラスを編集" style={{ fontSize: 10.5, padding: "1px 7px", borderRadius: 10, border: `1px solid ${PAPER_LINE}`, background: "#fff", color: INK_SOFT, cursor: "pointer" }}>🔧</button>
+          </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
             <label style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 2 }}>
               資産クラス
               <select value={h.assetCat} onChange={(e) => onUpdate({ assetCat: e.target.value })}
                 style={{ fontSize: 12, padding: "4px 6px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3 }}>
-                {ASSET_CLASSES.map((c) => <option key={c} value={c}>{c}</option>)}
+                {assetClassList.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </label>
-            <SubClassField assetCat={h.assetCat} value={h.subClass} onChange={(v) => onUpdate({ subClass: v })} />
+            <SubClassField assetCat={h.assetCat} value={h.subClass} onChange={(v) => onUpdate({ subClass: v })}
+              suggestions={subclassSuggestions[h.assetCat] || []} />
           </div>
           <div style={{ fontSize: 10.5, color: INK_SOFT, marginBottom: 4 }}>タグ</div>
           <div style={{ marginBottom: 8 }}>
@@ -3559,7 +3599,7 @@ function HoldingCard({ h, idx, onUpdate, onDelete, fxRate, fmtCur = fmtYen, cash
           {tradeOpen && (
             <TradeForm kind={tradeOpen} idx={idx} h={h} fxRate={fxRate} cashList={cashList} cashLink={cashLink}
               onRequestCashPick={onRequestCashPick}
-              onApplyWithCash={(i, patch, cashDelta) => { onApplyWithCash(i, patch, cashDelta); setTradeOpen(null); }}
+              onApplyWithCash={(i, patch, cashDelta, cashIdx) => { onApplyWithCash(i, patch, cashDelta, cashIdx); setTradeOpen(null); }}
               onCancel={() => setTradeOpen(null)} />
           )}
         </div>
@@ -3672,7 +3712,123 @@ function PortfolioFilterPopup({ filter, setFilter, availAssetCats, subClassByCat
   );
 }
 
-function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, setParams, asOfDate, setAsOfDate }) {
+// 資産クラス・サブクラス候補の追加/名前変更/削除。資産クラスの名前変更は
+// 既存銘柄のassetCatにも遡って反映し、使用中のクラスは削除できないようにする
+function ClassManagerModal({ assetClassList, setAssetClassList, subclassSuggestions, setSubclassSuggestions, holdings, setHoldings, onClose }) {
+  const [newClass, setNewClass] = useState("");
+  const [activeClass, setActiveClass] = useState(assetClassList[0] || "");
+  const [newSub, setNewSub] = useState("");
+  const countInUse = (cls) => holdings.filter((h) => (h.assetCat || "その他") === cls).length;
+
+  const addClass = () => {
+    const name = newClass.trim();
+    if (!name || assetClassList.includes(name)) return;
+    setAssetClassList((prev) => [...prev, name]);
+    setNewClass("");
+  };
+  const renameClass = (oldName) => {
+    const input = window.prompt("資産クラス名を変更", oldName);
+    if (input == null) return;
+    const name = input.trim();
+    if (!name || name === oldName) return;
+    if (assetClassList.includes(name)) { window.alert("その名前は既に使われています。"); return; }
+    setAssetClassList((prev) => prev.map((c) => (c === oldName ? name : c)));
+    setSubclassSuggestions((prev) => {
+      const next = { ...prev };
+      if (next[oldName]) { next[name] = next[oldName]; delete next[oldName]; }
+      return next;
+    });
+    setHoldings((prev) => prev.map((h) => (h.assetCat === oldName ? { ...h, assetCat: name } : h)));
+    if (activeClass === oldName) setActiveClass(name);
+  };
+  const deleteClass = (cls) => {
+    const inUse = countInUse(cls);
+    if (inUse > 0) { window.alert(`「${cls}」は${inUse}件の銘柄で使われているため削除できません。先に銘柄の資産クラスを変更してください。`); return; }
+    if (!window.confirm(`「${cls}」を削除しますか？`)) return;
+    setAssetClassList((prev) => prev.filter((c) => c !== cls));
+    setSubclassSuggestions((prev) => { const next = { ...prev }; delete next[cls]; return next; });
+    if (activeClass === cls) setActiveClass(assetClassList.find((c) => c !== cls) || "");
+  };
+  const addSub = () => {
+    const name = newSub.trim();
+    if (!name || !activeClass) return;
+    setSubclassSuggestions((prev) => {
+      const list = prev[activeClass] || [];
+      if (list.includes(name)) return prev;
+      return { ...prev, [activeClass]: [...list, name] };
+    });
+    setNewSub("");
+  };
+  const removeSub = (cls, sub) => {
+    setSubclassSuggestions((prev) => ({ ...prev, [cls]: (prev[cls] || []).filter((s) => s !== sub) }));
+  };
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(30,26,20,0.35)", zIndex: 190 }} />
+      <div style={{
+        position: "fixed", left: 12, right: 12, top: 60, bottom: 60, zIndex: 191, background: "#fff", borderRadius: 8,
+        boxShadow: "0 10px 30px rgba(0,0,0,0.25)", border: `1px solid ${PAPER_LINE}`,
+        display: "flex", flexDirection: "column", overflow: "hidden",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: INK }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: PAPER }}>🔧 資産クラス・サブクラスの編集</div>
+          <button onClick={onClose} style={{ border: "none", background: "transparent", color: PAPER, fontSize: 12, cursor: "pointer" }}>閉じる ×</button>
+        </div>
+        <div style={{ padding: 12, overflowY: "auto", flex: 1 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: INK, marginBottom: 6 }}>資産クラス</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+            {assetClassList.map((c) => (
+              <div key={c} onClick={() => setActiveClass(c)} style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 8px",
+                border: `1px solid ${activeClass === c ? GOLD : PAPER_LINE}`, borderRadius: 4, cursor: "pointer",
+                background: activeClass === c ? GOLD_SOFT : "#fff",
+              }}>
+                <span style={{ fontSize: 12.5, color: INK }}>{c}{countInUse(c) > 0 ? `（${countInUse(c)}件）` : ""}</span>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button onClick={(e) => { e.stopPropagation(); renameClass(c); }} style={{ fontSize: 10.5, padding: "2px 8px", borderRadius: 10, border: `1px solid ${PAPER_LINE}`, background: "#fff", color: INK_SOFT, cursor: "pointer" }}>名前変更</button>
+                  <button onClick={(e) => { e.stopPropagation(); deleteClass(c); }} style={{ fontSize: 10.5, padding: "2px 8px", borderRadius: 10, border: `1px solid ${PAPER_LINE}`, background: "#fff", color: SEAL, cursor: "pointer" }}>削除</button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+            <input value={newClass} onChange={(e) => setNewClass(e.target.value)} placeholder="新しい資産クラス名"
+              onKeyDown={(e) => e.key === "Enter" && addClass()}
+              style={{ flex: 1, fontSize: 12.5, padding: "6px 8px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4 }} />
+            <button onClick={addClass} style={{ fontSize: 12, padding: "6px 12px", borderRadius: 4, border: "none", background: GOLD, color: "#fff", cursor: "pointer" }}>＋追加</button>
+          </div>
+
+          {activeClass && (
+            <>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: INK, marginBottom: 6 }}>「{activeClass}」のサブクラス候補</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+                {(subclassSuggestions[activeClass] || []).map((s) => (
+                  <span key={s} style={{ fontSize: 11, background: PAPER, border: `1px solid ${PAPER_LINE}`, borderRadius: 10, padding: "3px 8px", display: "flex", alignItems: "center", gap: 6 }}>
+                    {s}
+                    <button onClick={() => removeSub(activeClass, s)} style={{ border: "none", background: "transparent", color: SEAL, cursor: "pointer", fontSize: 12, padding: 0 }}>×</button>
+                  </span>
+                ))}
+                {(subclassSuggestions[activeClass] || []).length === 0 && <span style={{ fontSize: 11, color: INK_SOFT }}>まだありません</span>}
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input value={newSub} onChange={(e) => setNewSub(e.target.value)} placeholder="新しいサブクラス候補"
+                  onKeyDown={(e) => e.key === "Enter" && addSub()}
+                  style={{ flex: 1, fontSize: 12.5, padding: "6px 8px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4 }} />
+                <button onClick={addSub} style={{ fontSize: 12, padding: "6px 12px", borderRadius: 4, border: "none", background: GOLD, color: "#fff", cursor: "pointer" }}>＋追加</button>
+              </div>
+              <div style={{ fontSize: 10, color: INK_SOFT, marginTop: 8 }}>
+                サブクラスは各銘柄の詳細で自由入力もできます。ここでの候補は入力時の候補（サジェスト）として使われます。
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, setParams, asOfDate, setAsOfDate, assetClassList, setAssetClassList, subclassSuggestions, setSubclassSuggestions }) {
   const totalCash = cashList.reduce((s, c) => s + (c.amount || 0), 0);
   const totalValue = holdings.reduce((s, h) => s + (h.valueJpy || 0), 0) + totalCash;
   const totalCost = holdings.reduce((s, h) => s + (h.avgJpyTotal || 0), 0);
@@ -3765,8 +3921,10 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
   const [cashLink, setCashLink] = useState(null); // { mode: "trade"|"account", holdingIdx: number|"NEW", cashIdx: number|null }
   const [cashOpen, setCashOpen] = useState(true);
   const cashSectionRef = useRef(null);
+  const addFormRef = useRef(null);
   const holdingRefs = useRef({});
   const [pendingNewAccountId, setPendingNewAccountId] = useState(null);
+  const [showClassManager, setShowClassManager] = useState(false);
   const requestCashPick = (holdingIdx) => {
     setCashLink({ mode: "trade", holdingIdx, cashIdx: null });
     setCashOpen(true);
@@ -3785,19 +3943,21 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
       if (holdingIdx === "NEW") setPendingNewAccountId(cashId);
       else updateHoldingPatch(holdingIdx, { linkedCashId: cashId });
       setCashLink(null);
-      if (holdingIdx !== "NEW") requestAnimationFrame(() => holdingRefs.current[holdingIdx]?.scrollIntoView({ behavior: "smooth", block: "center" }));
+      requestAnimationFrame(() => {
+        if (holdingIdx === "NEW") addFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        else holdingRefs.current[holdingIdx]?.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
       return;
     }
     setCashLink({ mode: "trade", holdingIdx, cashIdx });
     requestAnimationFrame(() => holdingRefs.current[holdingIdx]?.scrollIntoView({ behavior: "smooth", block: "center" }));
   };
-  const applyTradeWithCash = (holdingIdx, patch, cashDelta) => {
+  const applyTradeWithCash = (holdingIdx, patch, cashDelta, cashIdx) => {
     updateHoldingPatch(holdingIdx, patch);
-    if (cashLink && cashLink.mode === "trade" && cashLink.holdingIdx === holdingIdx && cashLink.cashIdx != null && cashDelta) {
-      const ci = cashLink.cashIdx;
+    if (cashIdx != null && cashDelta) {
       setCashList((prev) => {
         const next = [...prev];
-        next[ci] = { ...next[ci], amount: (next[ci].amount || 0) + cashDelta };
+        next[cashIdx] = { ...next[cashIdx], amount: (next[cashIdx].amount || 0) + cashDelta };
         return next;
       });
     }
@@ -3807,11 +3967,24 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
   return (
     <div style={{ paddingBottom: 40 }}>
       <SectionHeader title="保有ポートフォリオ" sub="評価額・取得額を編集すると合計と集計に反映されます" rightSlot={
-        <button onClick={() => setFilterOpen(true)} style={{
-          fontSize: 11.5, padding: "6px 10px", borderRadius: 4, border: `1px solid ${isFiltering ? GOLD : PAPER_LINE}`,
-          background: isFiltering ? GOLD_SOFT : CARD, color: INK, cursor: "pointer", whiteSpace: "nowrap",
-        }}>🔍 フィルター{isFiltering ? `（${shownCount}件）` : ""}</button>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={() => setShowClassManager(true)} title="資産クラス・サブクラスを編集" style={{
+            fontSize: 11.5, padding: "6px 10px", borderRadius: 4, border: `1px solid ${PAPER_LINE}`,
+            background: CARD, color: INK, cursor: "pointer", whiteSpace: "nowrap",
+          }}>🔧</button>
+          <button onClick={() => setFilterOpen(true)} style={{
+            fontSize: 11.5, padding: "6px 10px", borderRadius: 4, border: `1px solid ${isFiltering ? GOLD : PAPER_LINE}`,
+            background: isFiltering ? GOLD_SOFT : CARD, color: INK, cursor: "pointer", whiteSpace: "nowrap",
+          }}>🔍 フィルター{isFiltering ? `（${shownCount}件）` : ""}</button>
+        </div>
       } />
+      {showClassManager && (
+        <ClassManagerModal
+          assetClassList={assetClassList} setAssetClassList={setAssetClassList}
+          subclassSuggestions={subclassSuggestions} setSubclassSuggestions={setSubclassSuggestions}
+          holdings={holdings} setHoldings={setHoldings}
+          onClose={() => setShowClassManager(false)} />
+      )}
       <div style={{ padding: "0 16px 10px", display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ fontSize: 11, color: INK_SOFT }}>表示通貨</span>
         <div style={{ display: "flex", borderRadius: 4, overflow: "hidden", border: `1px solid ${PAPER_LINE}` }}>
@@ -3846,7 +4019,7 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
           onClose={() => setFilterOpen(false)} />
       )}
 
-      <div style={{ padding: "0 16px" }}>
+      <div style={{ padding: "0 16px" }} ref={addFormRef}>
         <AddHoldingForm
           onAdd={(h) => { setHoldings((prev) => [...prev, h]); setPendingNewAccountId(null); }}
           fxRate={params.fxRate}
@@ -3854,6 +4027,9 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
           pendingAccountId={pendingNewAccountId}
           onRequestAccountPick={() => requestAccountPick("NEW")}
           onClearAccountId={() => setPendingNewAccountId(null)}
+          assetClassList={assetClassList}
+          subclassSuggestions={subclassSuggestions}
+          onOpenClassManager={() => setShowClassManager(true)}
         />
       </div>
 
@@ -3956,6 +4132,8 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
                     cashList={cashList} cashLink={cashLink}
                     onRequestCashPick={requestCashPick} onApplyWithCash={applyTradeWithCash}
                     onRequestAccountPick={requestAccountPick}
+                    assetClassList={assetClassList} subclassSuggestions={subclassSuggestions}
+                    onOpenClassManager={() => setShowClassManager(true)}
                     onCardRef={(idx, el) => { holdingRefs.current[idx] = el; }}
                     onUpdate={(patch) => updateHoldingPatch(i, patch)}
                     onDelete={() => deleteHolding(i)}
@@ -4722,6 +4900,8 @@ export default function App() {
   const [saveNote, setSaveNote] = useState("");
   const [asOfDate, setAsOfDate] = useState(new Date().toISOString().slice(0, 10));
   const [portfolioLogs, setPortfolioLogs] = useState([]);
+  const [assetClassList, setAssetClassList] = useState(defaultAssetClassListState);
+  const [subclassSuggestions, setSubclassSuggestions] = useState(defaultSubclassSuggestionsState);
   const [family, setFamily] = useState(defaultFamilyState);
   const [showFamilyModal, setShowFamilyModal] = useState(false);
   const [showCostWizard, setShowCostWizard] = useState(false);
@@ -4751,7 +4931,7 @@ export default function App() {
       if (raw) {
         const parsed = JSON.parse(raw);
         applyMigratedState(migrateLoadedState(parsed), {
-          setSim, setParams, setHoldings, setCashList, setPortfolioLogs, setFamily, setLedger, setScenario,
+          setSim, setParams, setHoldings, setCashList, setPortfolioLogs, setAssetClassList, setSubclassSuggestions, setFamily, setLedger, setScenario,
         });
       }
     } catch (e) { /* no saved state yet */ }
@@ -4781,7 +4961,7 @@ export default function App() {
       if (data) {
         skipNextCloudSaveRef.current = true;
         applyMigratedState(migrateLoadedState(data), {
-          setSim, setParams, setHoldings, setCashList, setPortfolioLogs, setFamily, setLedger, setScenario,
+          setSim, setParams, setHoldings, setCashList, setPortfolioLogs, setAssetClassList, setSubclassSuggestions, setFamily, setLedger, setScenario,
         });
       }
       setCloudDataLoaded(true);
@@ -4794,25 +4974,25 @@ export default function App() {
     if (skipNextCloudSaveRef.current) { skipNextCloudSaveRef.current = false; return; }
     if (cloudSaveTimer.current) clearTimeout(cloudSaveTimer.current);
     cloudSaveTimer.current = setTimeout(() => {
-      saveHouseholdData(householdId, { sim, params, holdings, cashList, portfolioLogs, family, ledger, scenario })
+      saveHouseholdData(householdId, { sim, params, holdings, cashList, portfolioLogs, assetClassList, subclassSuggestions, family, ledger, scenario })
         .catch(() => { /* オフライン等：次の変更時に再送される */ });
     }, 700);
     return () => clearTimeout(cloudSaveTimer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sim, params, holdings, cashList, portfolioLogs, family, ledger, scenario, householdId, cloudDataLoaded]);
+  }, [sim, params, holdings, cashList, portfolioLogs, assetClassList, subclassSuggestions, family, ledger, scenario, householdId, cloudDataLoaded]);
 
   useEffect(() => {
     if (!loaded) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({ sim, params, holdings, cashList, portfolioLogs, family, ledger, scenario }));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ sim, params, holdings, cashList, portfolioLogs, assetClassList, subclassSuggestions, family, ledger, scenario }));
         setSaveNote("保存済み");
         setTimeout(() => setSaveNote(""), 1500);
       } catch (e) { /* storage unavailable */ }
     }, 700);
     return () => clearTimeout(saveTimer.current);
-  }, [sim, params, holdings, cashList, portfolioLogs, family, ledger, scenario, loaded]);
+  }, [sim, params, holdings, cashList, portfolioLogs, assetClassList, subclassSuggestions, family, ledger, scenario, loaded]);
 
   const resetAll = () => {
     if (!window.confirm("編集内容をすべて元のデータに戻しますか？（家計簿の入力データも消えます）")) return;
@@ -4821,6 +5001,8 @@ export default function App() {
     setHoldings(defaultPortfolioState());
     setCashList(defaultCashState());
     setPortfolioLogs([]);
+    setAssetClassList(defaultAssetClassListState());
+    setSubclassSuggestions(defaultSubclassSuggestionsState());
     setFamily(defaultFamilyState());
     setLedger(defaultLedgerState());
     setScenario(defaultScenarioState());
@@ -4828,7 +5010,7 @@ export default function App() {
 
   const fileInputRef = useRef(null);
   const exportData = () => {
-    const payload = { sim, params, holdings, cashList, portfolioLogs, family, ledger, scenario, exportedAt: new Date().toISOString() };
+    const payload = { sim, params, holdings, cashList, portfolioLogs, assetClassList, subclassSuggestions, family, ledger, scenario, exportedAt: new Date().toISOString() };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -4849,7 +5031,7 @@ export default function App() {
         const parsed = JSON.parse(ev.target.result);
         if (!window.confirm("このファイルの内容で、今の編集内容を上書きします。よろしいですか？")) return;
         applyMigratedState(migrateLoadedState(parsed), {
-          setSim, setParams, setHoldings, setCashList, setPortfolioLogs, setFamily, setLedger, setScenario,
+          setSim, setParams, setHoldings, setCashList, setPortfolioLogs, setAssetClassList, setSubclassSuggestions, setFamily, setLedger, setScenario,
         });
         setSaveNote("読み込み完了");
         setTimeout(() => setSaveNote(""), 1500);
@@ -4924,7 +5106,7 @@ export default function App() {
       />
 
       {tab === "sim" && <SimulationTab sim={sim} setSim={setSim} params={params} setParams={setParams} scenario={scenario} setScenario={setScenario} onOpenWizard={openCostWizard} onOpenSheet={() => setShowSheet(true)} />}
-      {tab === "portfolio" && <PortfolioTab holdings={holdings} setHoldings={setHoldings} cashList={cashList} setCashList={setCashList} params={params} setParams={setParams} asOfDate={asOfDate} setAsOfDate={setAsOfDate} />}
+      {tab === "portfolio" && <PortfolioTab holdings={holdings} setHoldings={setHoldings} cashList={cashList} setCashList={setCashList} params={params} setParams={setParams} asOfDate={asOfDate} setAsOfDate={setAsOfDate} assetClassList={assetClassList} setAssetClassList={setAssetClassList} subclassSuggestions={subclassSuggestions} setSubclassSuggestions={setSubclassSuggestions} />}
       {tab === "aggregate" && <AggregationTab holdings={holdings} cashList={cashList} sim={sim} params={params} setParams={setParams} asOfDate={asOfDate} portfolioLogs={portfolioLogs} setPortfolioLogs={setPortfolioLogs} />}
       {showSheet && (
         <div style={{ position: "fixed", inset: 0, background: PAPER, zIndex: 200, overflowY: "auto", fontFamily: "'Noto Sans JP','Hiragino Sans',sans-serif" }}>
