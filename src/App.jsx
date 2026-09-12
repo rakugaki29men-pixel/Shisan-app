@@ -3243,13 +3243,8 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
         </div>
       )}
       {showCashFloorWarning && activeChartIdx != null && chartData[activeChartIdx]?.cashFloorHit && (
-        <div style={{ margin: "0 16px 10px", padding: "8px 10px", fontSize: 12, background: SEAL_SOFT, border: `1px solid ${SEAL}`, borderRadius: 4, color: INK }}>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>{chartData[activeChartIdx].year}年</div>
-          <div>総資産：{fmtMan(chartData[activeChartIdx].総資産)}</div>
-          <div>不動産：{fmtMan(chartData[activeChartIdx].不動産)}</div>
-          <div>現金：{fmtMan(chartData[activeChartIdx].現金)}</div>
-          <div>他金融資産：{fmtMan(chartData[activeChartIdx].他金融資産)}</div>
-          <div style={{ color: SEAL, fontWeight: 600, marginTop: 4 }}>⚠ 現金がその年の支出合計まで低下、他金融資産を取り崩しています</div>
+        <div style={{ margin: "0 16px 10px", padding: "8px 10px", fontSize: 12, background: SEAL_SOFT, border: `1px solid ${SEAL}`, borderRadius: 4, color: SEAL, fontWeight: 600 }}>
+          ⚠ {chartData[activeChartIdx].year}年：現金がその年の支出合計まで低下、他金融資産を取り崩しています
         </div>
       )}
       <div style={{ padding: "4px 16px 0" }}>
