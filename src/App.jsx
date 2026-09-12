@@ -402,6 +402,13 @@ function currencySymbolFor(code) { return CURRENCIES.find((c) => c.code === code
 // JPY建てなら常に1、それ以外は現在の設定レート（未設定ならおおよその目安値）を返す
 function fxRateFor(fxRates, code) { return (!code || code === "JPY") ? 1 : ((fxRates && fxRates[code]) ?? DEFAULT_FX_RATES[code] ?? 150); }
 
+// 評価額（円）＝数量×単価（投信は口数×基準価額）から算出する。
+// 数量・単価・通貨のいずれかを編集した際に評価額を追従させるために使う
+function computeHoldingValueJpy(h, fxRates) {
+  if (h.qtyMode === "nav10000") return ((h.unitsImplied || 0) / 10000) * (h.priceJpyUnit || 0);
+  return (h.qty || 0) * (h.priceUnit || 0) * fxRateFor(fxRates, h.currency);
+}
+
 function defaultPortfolioState() { return migrateCurrencyFields(migrateHoldingFields(clone(RAW.portfolio.holdings))); }
 
 // 現金口座を保有銘柄から安定して参照できるよう、行の並べ替えに影響されないIDを付与する
@@ -4002,20 +4009,29 @@ function HoldingCard({ h, idx, onUpdate, onDelete, fxRates, fmtCur = fmtYen, cas
             <label style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               {h.qtyMode === "nav10000" ? "保有口数" : "保有数量"}
               <CommaNumberInput value={displayQty ?? 0}
-                onChange={(v) => onUpdate(h.qtyMode === "nav10000" ? { unitsImplied: v ?? 0 } : { qty: v ?? 0 })}
+                onChange={(v) => {
+                  const patch = h.qtyMode === "nav10000" ? { unitsImplied: v ?? 0 } : { qty: v ?? 0 };
+                  onUpdate({ ...patch, valueJpy: computeHoldingValueJpy({ ...h, ...patch }, fxRates) });
+                }}
                 style={{ width: 92, textAlign: "right", padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
             </label>
             <label style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               {h.qtyMode === "nav10000" ? "基準価額(¥/1万口)" : `単価(${currencySymbolFor(h.currency)})`}
               <CommaNumberInput
                 value={h.qtyMode === "nav10000" ? h.priceJpyUnit : h.priceUnit}
-                onChange={(v) => onUpdate(h.qtyMode === "nav10000" ? { priceJpyUnit: v ?? 0 } : { priceUnit: v ?? 0 })}
+                onChange={(v) => {
+                  const patch = h.qtyMode === "nav10000" ? { priceJpyUnit: v ?? 0 } : { priceUnit: v ?? 0 };
+                  onUpdate({ ...patch, valueJpy: computeHoldingValueJpy({ ...h, ...patch }, fxRates) });
+                }}
                 style={{ width: 92, textAlign: "right", padding: "3px 5px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3, fontVariantNumeric: "tabular-nums" }} />
             </label>
             {h.qtyMode !== "nav10000" && (
               <label style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                 通貨
-                <select value={h.currency || "JPY"} onChange={(e) => onUpdate({ currency: e.target.value })}
+                <select value={h.currency || "JPY"} onChange={(e) => {
+                  const patch = { currency: e.target.value };
+                  onUpdate({ ...patch, valueJpy: computeHoldingValueJpy({ ...h, ...patch }, fxRates) });
+                }}
                   style={{ fontSize: 12, padding: "4px 6px", border: `1px solid ${PAPER_LINE}`, borderRadius: 3 }}>
                   {CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.code}</option>)}
                 </select>
