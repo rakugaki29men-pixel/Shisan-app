@@ -286,6 +286,12 @@ function migrateLoadedState(parsed) {
     fixedSim = fixedSim ? rh.sim : null;
     fixedParams = fixedParams ? rh.params : null;
   }
+  let pathRemap = {};
+  if (fixedSim) {
+    const rf = migrateExpenseIncomeFreeform(fixedSim);
+    fixedSim = rf.sim;
+    pathRemap = rf.pathRemap;
+  }
   return {
     sim: fixedSim,
     params: fixedParams,
@@ -295,7 +301,7 @@ function migrateLoadedState(parsed) {
     assetClassList: parsed.assetClassList || null,
     subclassSuggestions: parsed.subclassSuggestions || null,
     family: parsed.family || null,
-    ledger: parsed.ledger ? migrateLedgerLinks({ ...defaultLedgerState(), ...parsed.ledger }) : null,
+    ledger: parsed.ledger ? migrateLedgerLinks({ ...defaultLedgerState(), ...parsed.ledger }, pathRemap) : null,
     scenario: parsed.scenario ? { ...defaultScenarioState(), ...parsed.scenario } : null,
   };
 }
@@ -312,8 +318,9 @@ function applyMigratedState(migrated, setters) {
   if (migrated.scenario) setters.setScenario(migrated.scenario);
 }
 
-// 家計簿の紐付けが旧・家族別食費項目を指していた場合、統合後の項目に付け替える
-function migrateLedgerLinks(ledger) {
+// 家計簿の紐付けが旧・家族別食費項目を指していた場合、統合後の項目に付け替える。
+// pathRemap には、住宅・車・生活費等が自由入力行へ移行した際の旧パス→新パスの対応が入る
+function migrateLedgerLinks(ledger, pathRemap) {
   if (!ledger?.categories) return ledger;
   const renameMap = {
     "living.food_father": "living.food", "living.food_mother": "living.food",
@@ -324,13 +331,18 @@ function migrateLedgerLinks(ledger) {
     if (c.linkPath && renameMap[c.linkPath]) { changed = true; return { ...c, linkPath: renameMap[c.linkPath] }; }
     // 住宅プラン「簡易4択」廃止に伴い、住宅費の紐付け先が無くなった分は解除する
     if (c.linkPath && LEGACY_HOUSING_EXPENSE_KEYS.includes(c.linkPath)) { changed = true; return { ...c, linkPath: null }; }
+    // 車・生活費・交際費等・収入が自由入力行へ移行した分は、対応する新しい行へ付け替える
+    if (c.linkPath && pathRemap && pathRemap[c.linkPath]) { changed = true; return { ...c, linkPath: pathRemap[c.linkPath] }; }
     return c;
   });
   return changed ? { ...ledger, categories } : ledger;
 }
 
 function rawDefaultSimState() { return migrateSimFoodFields({ ...clone(RAW.sim), wizardTouched: [] }); }
-function defaultSimState() { return migrateHousingQuickMode(rawDefaultSimState(), rawDefaultParamsState()).sim; }
+function defaultSimState() {
+  const housingMigrated = migrateHousingQuickMode(rawDefaultSimState(), rawDefaultParamsState()).sim;
+  return migrateExpenseIncomeFreeform(housingMigrated).sim;
+}
 
 // 種別（個別銘柄／ETF／投信／仮想通貨）を単独フィールドではなく複数タグの1つとして扱い、
 // 株式・コモディティ・債権に分かれていたサブ分類を単一のsubClassにまとめ、
@@ -914,14 +926,89 @@ function migrateHousingQuickMode(sim, params) {
   return { sim: nextSim, params: nextParams };
 }
 
+/* ============================================================
+   車・他生活費・交際費等・収入の固定項目を、住宅と同様の自由入力行
+   （追加・編集・削除・並べ替え）へ移行する処理。
+   実績値はそのまま引き継ぎ、家計簿の紐付け（linkPath）も新しい行へ付け替える
+   ============================================================ */
+function migrateExpenseIncomeFreeform(sim) {
+  if (!sim) return { sim, pathRemap: {} };
+  const exp = sim.expense || {};
+  const inc = sim.income || {};
+  const hasLegacyCar = exp.car && exp.car.body !== undefined;
+  const hasLegacyLiving = exp.living && exp.living.food !== undefined;
+  const hasLegacySocial = exp.social !== undefined;
+  const hasLegacyIncome = inc.taxRefund !== undefined;
+  if (!hasLegacyCar && !hasLegacyLiving && !hasLegacySocial && !hasLegacyIncome) {
+    return { sim, pathRemap: {} };
+  }
+
+  const nextSim = clone(sim);
+  const pathRemap = {};
+  const addRow = (kind, sectionKey, rows, label, arr, oldPath) => {
+    if (!arr) return;
+    const id = genCustomRowId();
+    rows.push({ id, label, arr: YEARS.map((_, i) => arr[i] || 0) });
+    pathRemap[oldPath] = `custom:${kind}:${sectionKey || ""}:${id}`;
+  };
+
+  if (hasLegacyCar) {
+    nextSim.expense.customRows = nextSim.expense.customRows || {};
+    const rows = (nextSim.expense.customRows.car || []).slice();
+    addRow("expense", "car", rows, "本体", exp.car.body, "car.body");
+    addRow("expense", "car", rows, "駐車場", exp.car.parking, "car.parking");
+    addRow("expense", "car", rows, "ガス代", exp.car.gas, "car.gas");
+    addRow("expense", "car", rows, "保険", exp.car.insurance, "car.insurance");
+    addRow("expense", "car", rows, "税金", exp.car.tax, "car.tax");
+    addRow("expense", "car", rows, "車検", exp.car.inspection, "car.inspection");
+    addRow("expense", "car", rows, "他経費", exp.car.other, "car.other");
+    nextSim.expense.customRows.car = rows;
+    delete nextSim.expense.car;
+    if (nextSim.wizardTouched) nextSim.wizardTouched = nextSim.wizardTouched.filter((p) => !p.startsWith("car."));
+  }
+  if (hasLegacyLiving) {
+    nextSim.expense.customRows = nextSim.expense.customRows || {};
+    const rows = (nextSim.expense.customRows.living || []).slice();
+    addRow("expense", "living", rows, "食費", exp.living.food, "living.food");
+    addRow("expense", "living", rows, "光熱費", exp.living.utilities, "living.utilities");
+    addRow("expense", "living", rows, "通信費", exp.living.communication, "living.communication");
+    addRow("expense", "living", rows, "日用品・衣服", exp.living.daily_goods, "living.daily_goods");
+    nextSim.expense.customRows.living = rows;
+    delete nextSim.expense.living;
+  }
+  if (hasLegacySocial) {
+    nextSim.expense.customRows = nextSim.expense.customRows || {};
+    const rows = (nextSim.expense.customRows.social || []).slice();
+    addRow("expense", "social", rows, "交際費", exp.social, "social");
+    addRow("expense", "social", rows, "レジャー他", exp.leisure, "leisure");
+    addRow("expense", "social", rows, "その他", exp.other, "other");
+    addRow("expense", "social", rows, "突発", exp.sudden, "sudden");
+    nextSim.expense.customRows.social = rows;
+    delete nextSim.expense.social;
+    delete nextSim.expense.leisure;
+    delete nextSim.expense.other;
+    delete nextSim.expense.sudden;
+  }
+  if (hasLegacyIncome) {
+    const rows = (nextSim.income.customRows || []).slice();
+    addRow("income", null, rows, "税還付金他", inc.taxRefund, "taxRefund");
+    addRow("income", null, rows, "子供手当等", inc.other_childAllowance, "other_childAllowance");
+    addRow("income", null, rows, "年金・退職金", inc.pension_retirement, "pension_retirement");
+    nextSim.income.customRows = rows;
+    delete nextSim.income.taxRefund;
+    delete nextSim.income.other_childAllowance;
+    delete nextSim.income.pension_retirement;
+  }
+
+  return { sim: nextSim, pathRemap };
+}
+
 function computeModel(sim, params) {
   const exp = sim.expense;
   const inc = sim.income;
 
   const tuitionKeys = ["child1", "child1_extra", "child2", "child2_extra", "child3", "child3_extra"];
   const medicalKeys = ["us", "gfather_p", "gmother_p", "gfather_m", "gmother_m"];
-  const carKeys = ["body", "parking", "gas", "insurance", "tax", "inspection", "other"];
-  const livingKeys = ["food", "utilities", "communication", "daily_goods"];
 
   const tuition = zeros(), medical = zeros(), carTotal = zeros(), livingTotal = zeros();
 
@@ -934,22 +1021,24 @@ function computeModel(sim, params) {
   for (let i = 0; i < N; i++) {
     tuition[i] = sumArrAt(exp.tuition, tuitionKeys, i) + sumCustomAt(cr.tuition, i);
     medical[i] = sumArrAt(exp.medical, medicalKeys, i) + sumCustomAt(cr.medical, i);
-    carTotal[i] = sumArrAt(exp.car, carKeys, i) + sumCustomAt(cr.car, i);
-    livingTotal[i] = sumArrAt(exp.living, livingKeys, i) + sumCustomAt(cr.living, i);
+    // 車・他生活費・交際費等も住宅と同様、自由入力行のみで構成される
+    carTotal[i] = sumCustomAt(cr.car, i);
+    livingTotal[i] = sumCustomAt(cr.living, i);
   }
 
   const expenseTotal = zeros(), incomeTotal = zeros(), balance = zeros();
-  const dividend = zeros(), securities = zeros(), cash = zeros(), assetTotal = zeros();
+  const dividend = zeros(), securities = zeros(), cash = zeros(), assetTotal = zeros(), otherAssets = zeros();
 
   for (let i = 0; i < N; i++) {
     expenseTotal[i] = tuition[i] + (exp.dorm[i] ?? 0) + medical[i] + sumCustomAt(cr.housing, i) + carTotal[i] +
-      livingTotal[i] + (exp.social[i] ?? 0) + (exp.leisure[i] ?? 0) + (exp.other[i] ?? 0) + (exp.sudden[i] ?? 0) + sumCustomAt(cr.social, i)
+      livingTotal[i] + sumCustomAt(cr.social, i)
       - (params.housingSubsidyAnnual || 0);
 
     dividend[i] = i === 0 ? 0 : securities[i - 1] * params.dividendRate;
 
-    incomeTotal[i] = (inc.father[i] ?? 0) + (inc.mother[i] ?? 0) + (inc.taxRefund[i] ?? 0) +
-      (params.reinvestDividends ? 0 : dividend[i]) + (inc.other_childAllowance[i] ?? 0) + (inc.pension_retirement[i] ?? 0) + sumCustomAt(inc.customRows, i);
+    // 税還付金他・子供手当等・年金退職金も自由入力行（inc.customRows）に一本化されている
+    incomeTotal[i] = (inc.father[i] ?? 0) + (inc.mother[i] ?? 0) +
+      (params.reinvestDividends ? 0 : dividend[i]) + sumCustomAt(inc.customRows, i);
 
     balance[i] = incomeTotal[i] - expenseTotal[i];
 
@@ -971,11 +1060,12 @@ function computeModel(sim, params) {
     // ポートフォリオから実績を転記した年は、その値を起点に以降の年を再計算する
     const override = params.securitiesActualOverrides?.[YEARS[i]];
     if (override !== undefined && override !== null) securities[i] = override;
-    assetTotal[i] = securities[i] + cash[i] + realEstateAsset[i];
+    otherAssets[i] = sumCustomAt(sim.assetCustomRows, i);
+    assetTotal[i] = securities[i] + cash[i] + realEstateAsset[i] + otherAssets[i];
   }
 
   return {
-    tuition, medical, carTotal, livingTotal, realEstateAsset,
+    tuition, medical, carTotal, livingTotal, realEstateAsset, otherAssets,
     housingRate: housingPlan.rateArr,
     expenseTotal, incomeTotal, balance, dividend, securities, cash, assetTotal,
   };
@@ -1801,7 +1891,13 @@ function HousingWizardSlide({ params, setParams, sim, setSim }) {
   );
 }
 
-function CarWizardSlide({ setSim }) {
+const WIZARD_CAR_ROW_IDS = {
+  body: "wizard-car-body", parking: "wizard-car-parking", gas: "wizard-car-gas",
+  insurance: "wizard-car-insurance", tax: "wizard-car-tax", inspection: "wizard-car-inspection", other: "wizard-car-other",
+};
+const WIZARD_CAR_ROW_LABELS = { body: "本体", parking: "駐車場", gas: "ガス代", insurance: "保険", tax: "税金", inspection: "車検", other: "他経費" };
+
+function CarWizardSlide({ sim, setSim }) {
   const thisYear = new Date().getFullYear();
   const [cls, setCls] = useState("compact");
   const [customTotal, setCustomTotal] = useState(30);
@@ -1820,63 +1916,78 @@ function CarWizardSlide({ setSim }) {
   const [applied, setApplied] = useState("");
 
   const apply = () => {
+    const existingRows = sim.expense.customRows?.car || [];
+    const hadOtherRows = existingRows.some((r) => !Object.values(WIZARD_CAR_ROW_IDS).includes(r.id));
+
     setSim((prev) => {
       const next = clone(prev);
-      YEARS.forEach((y, idx) => {
-        if (y < thisYear) return;
-        if (cls === "custom") {
-          next.expense.car.gas[idx] = 0;
-          next.expense.car.insurance[idx] = 0;
-          next.expense.car.tax[idx] = 0;
-          next.expense.car.inspection[idx] = 0;
-          next.expense.car.other[idx] = (customTotal || 0) * count;
-        } else {
-          const band = CAR_BANDS[cls];
-          next.expense.car.gas[idx] = band.gas * count;
-          next.expense.car.insurance[idx] = band.insurance * count;
-          next.expense.car.tax[idx] = band.tax * count;
-          next.expense.car.inspection[idx] = band.inspection * count;
-          next.expense.car.other[idx] = band.other * count;
-        }
-        if (parkingMonthly !== "") next.expense.car.parking[idx] = (parseFloat(parkingMonthly) || 0) * 12;
-      });
+      next.expense.customRows = next.expense.customRows || {};
+      const rows = (next.expense.customRows.car || []).slice();
+      const findOrCreate = (key) => {
+        const id = WIZARD_CAR_ROW_IDS[key];
+        let row = rows.find((r) => r.id === id);
+        if (!row) { row = { id, label: WIZARD_CAR_ROW_LABELS[key], arr: zeros() }; rows.push(row); }
+        return row;
+      };
+      const setFrom = (key, valueForYear) => {
+        const row = findOrCreate(key);
+        YEARS.forEach((y, idx) => { if (y >= thisYear) row.arr[idx] = valueForYear(); });
+      };
 
-      const touched = new Set(next.wizardTouched || []);
-      ["car.gas", "car.insurance", "car.tax", "car.inspection", "car.other"].forEach((k) => touched.add(k));
-      if (parkingMonthly !== "") touched.add("car.parking");
+      if (cls === "custom") {
+        setFrom("gas", () => 0);
+        setFrom("insurance", () => 0);
+        setFrom("tax", () => 0);
+        setFrom("inspection", () => 0);
+        setFrom("other", () => (customTotal || 0) * count);
+      } else {
+        const band = CAR_BANDS[cls];
+        setFrom("gas", () => band.gas * count);
+        setFrom("insurance", () => band.insurance * count);
+        setFrom("tax", () => band.tax * count);
+        setFrom("inspection", () => band.inspection * count);
+        setFrom("other", () => band.other * count);
+      }
+      if (parkingMonthly !== "") setFrom("parking", () => (parseFloat(parkingMonthly) || 0) * 12);
 
       const acqYearNum = parseInt(acqYear, 10);
       if (acqType === "lump") {
         if (!isNaN(acqYearNum) && lumpPrice !== "") {
+          const bodyRow = findOrCreate("body");
           const idx = YEARS.indexOf(acqYearNum);
-          if (idx >= 0 && YEARS[idx] >= thisYear) next.expense.car.body[idx] = parseFloat(lumpPrice) || 0;
+          if (idx >= 0 && YEARS[idx] >= thisYear) bodyRow.arr[idx] = parseFloat(lumpPrice) || 0;
         }
       } else if (acqType === "loan") {
+        const bodyRow = findOrCreate("body");
         const payment = calcAnnuityPayment(Math.max(0, (loanPrice || 0) - (loanDownPayment || 0)), (loanRate || 0) / 100, loanTermYears || 1);
         YEARS.forEach((y, idx) => {
           if (y < thisYear) return;
           if (!isNaN(acqYearNum) && y >= acqYearNum && y < acqYearNum + (loanTermYears || 0)) {
-            next.expense.car.body[idx] = payment;
+            bodyRow.arr[idx] = payment;
           } else if (!isNaN(acqYearNum) && y >= acqYearNum) {
-            next.expense.car.body[idx] = 0;
+            bodyRow.arr[idx] = 0;
           }
         });
-        touched.add("car.body");
       } else if (acqType === "subscription") {
+        const bodyRow = findOrCreate("body");
+        const insuranceRow = findOrCreate("insurance");
+        const taxRow = findOrCreate("tax");
+        const inspectionRow = findOrCreate("inspection");
         YEARS.forEach((y, idx) => {
           if (y < thisYear) return;
-          next.expense.car.body[idx] = (subMonthly || 0) * 12;
-          next.expense.car.insurance[idx] = 0;
-          next.expense.car.tax[idx] = 0;
-          next.expense.car.inspection[idx] = 0;
+          bodyRow.arr[idx] = (subMonthly || 0) * 12;
+          insuranceRow.arr[idx] = 0;
+          taxRow.arr[idx] = 0;
+          inspectionRow.arr[idx] = 0;
         });
-        touched.add("car.body");
       }
-      next.wizardTouched = [...touched];
+      next.expense.customRows.car = rows;
       return next;
     });
-    setApplied("反映しました。「一覧」タブで確認できます。");
-    setTimeout(() => setApplied(""), 5000);
+    setApplied(hadOtherRows
+      ? "反映しました。「シミュレーション」タブの「車」に試算結果の行を追加・更新しました。他にも車の行が残っている場合は、重複していないか内容を確認し、不要な行は個別に削除してください。"
+      : "反映しました。「シミュレーション」タブの「車」で試算結果を確認・編集できます。");
+    setTimeout(() => setApplied(""), 8000);
   };
 
   return (
@@ -1997,7 +2108,7 @@ function CostWizardModal({ sim, setSim, params, setParams, family, onClose, init
       <div style={{ padding: "16px 16px 60px" }}>
         {step === "tuition" && <TuitionWizardSlide sim={sim} setSim={setSim} family={family} />}
         {step === "housing" && <HousingWizardSlide sim={sim} setSim={setSim} params={params} setParams={setParams} />}
-        {step === "car" && <CarWizardSlide setSim={setSim} />}
+        {step === "car" && <CarWizardSlide sim={sim} setSim={setSim} />}
       </div>
     </div>
   );
@@ -2163,11 +2274,13 @@ function SheetTab({ sim, setSim, params, setParams, family, setFamily, recordHis
     recordHistory();
     setSim((prev) => { const next = clone(prev); fillForward(next.income[key], i, v); return next; });
   };
-  const updateHousingCustomRow = (id) => (i, v) => {
+  // kind: "expense" | "income" | "asset"。sectionKeyはexpenseのカテゴリ名（housing/car/living/social）、収入・資産はnull
+  const updateSheetCustomRow = (kind, sectionKey, id) => (i, v) => {
     recordHistory();
     setSim((prev) => {
       const next = clone(prev);
-      const row = (next.expense.customRows?.housing || []).find((r) => r.id === id);
+      const list = kind === "income" ? next.income.customRows : kind === "asset" ? next.assetCustomRows : next.expense.customRows?.[sectionKey];
+      const row = (list || []).find((r) => r.id === id);
       if (row) fillForward(row.arr, i, v);
       return next;
     });
@@ -2261,7 +2374,7 @@ function SheetTab({ sim, setSim, params, setParams, family, setFamily, recordHis
 
             <SheetSectionLabel text="住宅" />
             {(exp.customRows?.housing || []).map((r) => (
-              <SheetRow key={r.id} label={r.label || "（項目名未設定）"} arr={r.arr} onChange={updateHousingCustomRow(r.id)} indent
+              <SheetRow key={r.id} label={r.label || "（項目名未設定）"} arr={r.arr} onChange={updateSheetCustomRow("expense", "housing", r.id)} indent
                 showTotals={showTotals} pctBase={bucketTotals.expense} />
             ))}
             <SheetRow label="住宅資産（残存評価）" arr={model.realEstateAsset} indent showTotals={showTotals} />
@@ -2269,40 +2382,42 @@ function SheetTab({ sim, setSim, params, setParams, family, setFamily, recordHis
               onChange={(i, v) => setRateOverride(YEARS[i], v)} indent showTotals={showTotals} />
 
             <SheetSectionLabel text="車" />
-            <SheetRow label="本体" arr={exp.car.body} onChange={mk("car.body")} indent wizard={isWizard("car.body")}  showTotals={showTotals} pctBase={bucketTotals.expense} />
-            <SheetRow label="駐車場" arr={exp.car.parking} onChange={mk("car.parking")} indent wizard={isWizard("car.parking")}  showTotals={showTotals} pctBase={bucketTotals.expense} />
-            <SheetRow label="ガス代" arr={exp.car.gas} onChange={mk("car.gas")} indent wizard={isWizard("car.gas")}  showTotals={showTotals} pctBase={bucketTotals.expense} />
-            <SheetRow label="保険" arr={exp.car.insurance} onChange={mk("car.insurance")} indent wizard={isWizard("car.insurance")}  showTotals={showTotals} pctBase={bucketTotals.expense} />
-            <SheetRow label="税金" arr={exp.car.tax} onChange={mk("car.tax")} indent wizard={isWizard("car.tax")}  showTotals={showTotals} pctBase={bucketTotals.expense} />
-            <SheetRow label="車検" arr={exp.car.inspection} onChange={mk("car.inspection")} indent wizard={isWizard("car.inspection")}  showTotals={showTotals} pctBase={bucketTotals.expense} />
-            <SheetRow label="他経費" arr={exp.car.other} onChange={mk("car.other")} indent wizard={isWizard("car.other")}  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            {(exp.customRows?.car || []).map((r) => (
+              <SheetRow key={r.id} label={r.label || "（項目名未設定）"} arr={r.arr} onChange={updateSheetCustomRow("expense", "car", r.id)} indent
+                showTotals={showTotals} pctBase={bucketTotals.expense} />
+            ))}
 
             <SheetSectionLabel text="他生活費" />
-            <SheetRow label="食費" arr={exp.living.food} onChange={mk("living.food")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
-            <SheetRow label="光熱費" arr={exp.living.utilities} onChange={mk("living.utilities")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
-            <SheetRow label="通信費" arr={exp.living.communication} onChange={mk("living.communication")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
-            <SheetRow label="日用品・衣服" arr={exp.living.daily_goods} onChange={mk("living.daily_goods")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            {(exp.customRows?.living || []).map((r) => (
+              <SheetRow key={r.id} label={r.label || "（項目名未設定）"} arr={r.arr} onChange={updateSheetCustomRow("expense", "living", r.id)} indent
+                showTotals={showTotals} pctBase={bucketTotals.expense} />
+            ))}
 
             <SheetSectionLabel text="その他支出" />
-            <SheetRow label="交際費" arr={exp.social} onChange={mk("social")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
-            <SheetRow label="レジャー他" arr={exp.leisure} onChange={mk("leisure")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
-            <SheetRow label="その他" arr={exp.other} onChange={mk("other")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
-            <SheetRow label="突発" arr={exp.sudden} onChange={mk("sudden")} indent  showTotals={showTotals} pctBase={bucketTotals.expense} />
+            {(exp.customRows?.social || []).map((r) => (
+              <SheetRow key={r.id} label={r.label || "（項目名未設定）"} arr={r.arr} onChange={updateSheetCustomRow("expense", "social", r.id)} indent
+                showTotals={showTotals} pctBase={bucketTotals.expense} />
+            ))}
 
             <SheetRow label="収入合計" arr={model.incomeTotal} bold highlight  showTotals={showTotals} pctBase={bucketTotals.income} />
             <SheetSectionLabel text="収入" />
             <SheetRow label={childLabel("father", "父")} arr={inc.father} onChange={mkInc("father")} indent  showTotals={showTotals} pctBase={bucketTotals.income} />
             <SheetRow label={childLabel("mother", "母")} arr={inc.mother} onChange={mkInc("mother")} indent  showTotals={showTotals} pctBase={bucketTotals.income} />
-            <SheetRow label="税還付金他" arr={inc.taxRefund} onChange={mkInc("taxRefund")} indent  showTotals={showTotals} pctBase={bucketTotals.income} />
             <SheetRow label="配当（自動計算）" arr={model.dividend} indent  showTotals={showTotals} pctBase={bucketTotals.income} />
-            <SheetRow label="子供手当等" arr={inc.other_childAllowance} onChange={mkInc("other_childAllowance")} indent  showTotals={showTotals} pctBase={bucketTotals.income} />
-            <SheetRow label="年金・退職金" arr={inc.pension_retirement} onChange={mkInc("pension_retirement")} indent  showTotals={showTotals} pctBase={bucketTotals.income} />
+            {(inc.customRows || []).map((r) => (
+              <SheetRow key={r.id} label={r.label || "（項目名未設定）"} arr={r.arr} onChange={updateSheetCustomRow("income", null, r.id)} indent
+                showTotals={showTotals} pctBase={bucketTotals.income} />
+            ))}
 
             <SheetRow label="収支" arr={model.balance} bold highlight  showTotals={showTotals} />
             <SheetSectionLabel text="資産推移（自動計算）" />
             <SheetRow label="金融資産" arr={model.securities} indent  showTotals={showTotals} pctBase={bucketTotals.asset} />
             <SheetRow label="現金" arr={model.cash} indent  showTotals={showTotals} pctBase={bucketTotals.asset} />
             <SheetRow label="不動産" arr={model.realEstateAsset} indent  showTotals={showTotals} pctBase={bucketTotals.asset} />
+            {(sim.assetCustomRows || []).map((r) => (
+              <SheetRow key={r.id} label={r.label || "（項目名未設定）"} arr={r.arr} onChange={updateSheetCustomRow("asset", null, r.id)} indent
+                showTotals={showTotals} pctBase={bucketTotals.asset} />
+            ))}
             <SheetRow label="総資産" arr={model.assetTotal} bold highlight  showTotals={showTotals} pctBase={bucketTotals.asset} />
           </div>
         </div>
@@ -2855,15 +2970,30 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
   const isWizard = (path) => (sim.wizardTouched || []).includes(path);
 
   // 各項目（学費・医療・車 等）ごとに自由に追加できるカスタム行
-  const customRowsFor = (kind, sectionKey) => (kind === "income" ? sim.income.customRows : sim.expense.customRows?.[sectionKey]) || [];
+  // kind: "expense" | "income" | "asset"。assetはsim.assetCustomRowsに直接持つ（セクション分けなし）
+  const customRowsFor = (kind, sectionKey) => {
+    if (kind === "income") return sim.income.customRows || [];
+    if (kind === "asset") return sim.assetCustomRows || [];
+    return sim.expense.customRows?.[sectionKey] || [];
+  };
+  const setCustomRowsList = (next, kind, sectionKey, updater) => {
+    if (kind === "income") { next.income.customRows = updater(next.income.customRows || []); return; }
+    if (kind === "asset") { next.assetCustomRows = updater(next.assetCustomRows || []); return; }
+    next.expense.customRows = next.expense.customRows || {};
+    next.expense.customRows[sectionKey] = updater(next.expense.customRows[sectionKey] || []);
+  };
+  const getCustomRowsList = (next, kind, sectionKey) => {
+    if (kind === "income") return next.income.customRows;
+    if (kind === "asset") return next.assetCustomRows;
+    return next.expense.customRows?.[sectionKey];
+  };
 
   // カスタム行の長押しドラッグでの並べ替え（項目ごとに独立した並び）
   const makeCustomRowDrag = (kind, sectionKey) => useDragReorder((order, from, to) => {
     recordHistory();
     setSim((prev) => {
       const next = clone(prev);
-      if (kind === "income") next.income.customRows = moveArrayItem(next.income.customRows || [], from, to);
-      else next.expense.customRows[sectionKey] = moveArrayItem(next.expense.customRows[sectionKey] || [], from, to);
+      setCustomRowsList(next, kind, sectionKey, (list) => moveArrayItem(list, from, to));
       return next;
     });
   });
@@ -2875,25 +3005,21 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
     living: makeCustomRowDrag("expense", "living"),
     social: makeCustomRowDrag("expense", "social"),
     income: makeCustomRowDrag("income", null),
+    asset: makeCustomRowDrag("asset", null),
   };
   const addCustomRow = (kind, sectionKey) => {
     recordHistory();
     setSim((prev) => {
       const next = clone(prev);
       const newRow = { id: `cr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, label: "", arr: zeros() };
-      if (kind === "income") next.income.customRows = [...(next.income.customRows || []), newRow];
-      else {
-        next.expense.customRows = next.expense.customRows || {};
-        next.expense.customRows[sectionKey] = [...(next.expense.customRows[sectionKey] || []), newRow];
-      }
+      setCustomRowsList(next, kind, sectionKey, (list) => [...list, newRow]);
       return next;
     });
   };
   const renameCustomRow = (kind, sectionKey, id) => (label) => {
     setSim((prev) => {
       const next = clone(prev);
-      const list = kind === "income" ? next.income.customRows : next.expense.customRows?.[sectionKey];
-      const row = (list || []).find((r) => r.id === id);
+      const row = (getCustomRowsList(next, kind, sectionKey) || []).find((r) => r.id === id);
       if (row) row.label = label;
       return next;
     });
@@ -2902,8 +3028,7 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
     recordHistory();
     setSim((prev) => {
       const next = clone(prev);
-      const list = kind === "income" ? next.income.customRows : next.expense.customRows?.[sectionKey];
-      const row = (list || []).find((r) => r.id === id);
+      const row = (getCustomRowsList(next, kind, sectionKey) || []).find((r) => r.id === id);
       if (row) fillForward(row.arr, i, v);
       return next;
     });
@@ -2913,8 +3038,7 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
     recordHistory();
     setSim((prev) => {
       const next = clone(prev);
-      if (kind === "income") next.income.customRows = (next.income.customRows || []).filter((r) => r.id !== id);
-      else next.expense.customRows[sectionKey] = (next.expense.customRows[sectionKey] || []).filter((r) => r.id !== id);
+      setCustomRowsList(next, kind, sectionKey, (list) => list.filter((r) => r.id !== id));
       return next;
     });
   };
@@ -2922,7 +3046,7 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
   // 「＋ 行を追加」ボタンを付け足す
   const customRowsBlock = (kind, sectionKey) => {
     const rows = customRowsFor(kind, sectionKey);
-    const drag = customRowDrags[kind === "income" ? "income" : sectionKey];
+    const drag = customRowDrags[(kind === "income" || kind === "asset") ? kind : sectionKey];
     const order = rows.map((r) => r.id);
     const renderOrder = drag.getRenderOrder(order);
     const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
@@ -3070,34 +3194,13 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
           <EditTable rows={customRowsBlock("expense", "housing").rows} addButton={customRowsBlock("expense", "housing").addButton} />
         </Accordion>
         <Accordion title="車" colorKey="car" onWizard={() => onOpenWizard("car")} wizardLabel="車ウィザード">
-          <EditTable rows={[
-            { label: "本体", arr: sim.expense.car.body, onChange: mk("car.body"), wizard: isWizard("car.body") },
-            { label: "駐車場", arr: sim.expense.car.parking, onChange: mk("car.parking"), wizard: isWizard("car.parking") },
-            { label: "ガス代", arr: sim.expense.car.gas, onChange: mk("car.gas"), wizard: isWizard("car.gas") },
-            { label: "保険", arr: sim.expense.car.insurance, onChange: mk("car.insurance"), wizard: isWizard("car.insurance") },
-            { label: "税金", arr: sim.expense.car.tax, onChange: mk("car.tax"), wizard: isWizard("car.tax") },
-            { label: "車検", arr: sim.expense.car.inspection, onChange: mk("car.inspection"), wizard: isWizard("car.inspection") },
-            { label: "他経費", arr: sim.expense.car.other, onChange: mk("car.other"), wizard: isWizard("car.other") },
-            ...customRowsBlock("expense", "car").rows,
-          ]} addButton={customRowsBlock("expense", "car").addButton} />
+          <EditTable rows={customRowsBlock("expense", "car").rows} addButton={customRowsBlock("expense", "car").addButton} />
         </Accordion>
         <Accordion title="他生活費" colorKey="living">
-          <EditTable rows={[
-            { label: "食費", arr: sim.expense.living.food, onChange: mk("living.food") },
-            { label: "光熱費", arr: sim.expense.living.utilities, onChange: mk("living.utilities") },
-            { label: "通信費", arr: sim.expense.living.communication, onChange: mk("living.communication") },
-            { label: "日用品・衣服", arr: sim.expense.living.daily_goods, onChange: mk("living.daily_goods") },
-            ...customRowsBlock("expense", "living").rows,
-          ]} addButton={customRowsBlock("expense", "living").addButton} />
+          <EditTable rows={customRowsBlock("expense", "living").rows} addButton={customRowsBlock("expense", "living").addButton} />
         </Accordion>
         <Accordion title="交際費・レジャー・その他・突発" colorKey="social">
-          <EditTable rows={[
-            { label: "交際費", arr: sim.expense.social, onChange: mk("social") },
-            { label: "レジャー他", arr: sim.expense.leisure, onChange: mk("leisure") },
-            { label: "その他", arr: sim.expense.other, onChange: mk("other") },
-            { label: "突発", arr: sim.expense.sudden, onChange: mk("sudden") },
-            ...customRowsBlock("expense", "social").rows,
-          ]} addButton={customRowsBlock("expense", "social").addButton} />
+          <EditTable rows={customRowsBlock("expense", "social").rows} addButton={customRowsBlock("expense", "social").addButton} />
         </Accordion>
       </div>
 
@@ -3107,9 +3210,6 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
           <EditTable rows={[
             { label: "父", arr: sim.income.father, onChange: mkInc("father") },
             { label: "母", arr: sim.income.mother, onChange: mkInc("mother") },
-            { label: "税還付金他", arr: sim.income.taxRefund, onChange: mkInc("taxRefund") },
-            { label: "子供手当等", arr: sim.income.other_childAllowance, onChange: mkInc("other_childAllowance") },
-            { label: "年金・退職金", arr: sim.income.pension_retirement, onChange: mkInc("pension_retirement") },
             { label: params.reinvestDividends ? "配当収入（再投資中のため収入から除外）" : "配当収入（自動計算）", arr: model.dividend, dimmed: params.reinvestDividends },
             ...customRowsBlock("income", null).rows,
           ]} addButton={customRowsBlock("income", null).addButton} />
@@ -3120,7 +3220,7 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
         </Accordion>
       </div>
 
-      <SectionHeader title="資産額" sub="現在の保有比率に、金融資産の年間成長率を当てはめた推計です" />
+      <SectionHeader title="資産額" sub="現在の保有比率に、金融資産の年間成長率を当てはめた推計です（ポートフォリオの資産クラスが増減すると自動で追従します）" />
       <div style={{ padding: "0 16px 8px" }}>
         <Accordion title="資産額" colorKey="tuition">
           <EditTable rows={[
@@ -3128,6 +3228,10 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
             { label: "現金", arr: model.cash },
             { label: "金融資産 合計", arr: model.securities },
           ]} />
+          <div style={{ fontSize: 11.5, color: INK_SOFT, margin: "10px 0 4px" }}>
+            退職金見込みなど、ポートフォリオ以外の資産を自由に追加・編集・削除できます（上の保有資産クラスの行は、ポートフォリオ画面の資産クラスと連動するためここでは削除できません）。
+          </div>
+          <EditTable rows={customRowsBlock("asset", null).rows} addButton={customRowsBlock("asset", null).addButton} />
           {Object.keys(params.securitiesActualOverrides || {}).length > 0 && (
             <div style={{ fontSize: 10.5, color: INK_SOFT, marginTop: 8 }}>
               ポートフォリオから転記済みの年：{Object.entries(params.securitiesActualOverrides).sort(([a], [b]) => a - b).map(([y, v]) => `${y}年(${fmt(v)}万円)`).join("、")}
@@ -4908,29 +5012,37 @@ function defaultLedgerState() {
   return {
     entries: clone(SEED_LEDGER_ENTRIES),
     categories: [
-      { id: "food", name: "食費", type: "expense", linkPath: "living.food" },
+      { id: "food", name: "食費", type: "expense", linkPath: null },
       { id: "eatout", name: "外食", type: "expense", linkPath: null },
-      { id: "daily", name: "日用品・衣服", type: "expense", linkPath: "living.daily_goods" },
-      { id: "utilities", name: "光熱費", type: "expense", linkPath: "living.utilities" },
-      { id: "communication", name: "通信費", type: "expense", linkPath: "living.communication" },
+      { id: "daily", name: "日用品・衣服", type: "expense", linkPath: null },
+      { id: "utilities", name: "光熱費", type: "expense", linkPath: null },
+      { id: "communication", name: "通信費", type: "expense", linkPath: null },
       { id: "car", name: "車関連", type: "expense", linkPath: null },
       { id: "housing", name: "住宅", type: "expense", linkPath: null },
       { id: "medical", name: "医療費", type: "expense", linkPath: null },
       { id: "education", name: "教育費", type: "expense", linkPath: null },
-      { id: "social", name: "交際費", type: "expense", linkPath: "social" },
-      { id: "leisure", name: "レジャー", type: "expense", linkPath: "leisure" },
-      { id: "other_exp", name: "その他支出", type: "expense", linkPath: "other" },
+      { id: "social", name: "交際費", type: "expense", linkPath: null },
+      { id: "leisure", name: "レジャー", type: "expense", linkPath: null },
+      { id: "other_exp", name: "その他支出", type: "expense", linkPath: null },
       { id: "salary", name: "給料", type: "income", linkPath: "father" },
       { id: "bonus", name: "賞与", type: "income", linkPath: null },
-      { id: "child_allowance", name: "児童手当", type: "income", linkPath: "other_childAllowance" },
+      { id: "child_allowance", name: "児童手当", type: "income", linkPath: null },
       { id: "other_inc", name: "その他収入", type: "income", linkPath: null },
     ],
   };
 }
 
+// 車・他生活費・交際費等・収入（父母を除く）は自由入力行のため、固定パスではなく
+// 現在実際に存在する行を動的に列挙して紐付け候補にする
+const FREEFORM_LINK_GROUPS = [
+  { kind: "expense", sectionKey: "car", group: "車" },
+  { kind: "expense", sectionKey: "living", group: "他生活費" },
+  { kind: "expense", sectionKey: "social", group: "交際費・レジャー・その他・突発" },
+];
+
 // 家計簿の費目から紐付けられるシミュレーション上の項目一覧を返す
-// （住宅費は自由入力行に一本化しているため、固定パスでの紐付け対象にはできない）
-function getLinkableFields(params) {
+// （住宅費・車・他生活費・交際費等・大半の収入は自由入力行のため、固定パスでの紐付け対象にはできない）
+function getLinkableFields(params, sim) {
   const expense = [
     { group: "学費", path: "tuition.child1", label: "子1" },
     { group: "学費", path: "tuition.child1_extra", label: "子1（習い事等）" },
@@ -4944,47 +5056,57 @@ function getLinkableFields(params) {
     { group: "医療・介護", path: "medical.gmother_p", label: "父方祖母" },
     { group: "医療・介護", path: "medical.gfather_m", label: "母方祖父" },
     { group: "医療・介護", path: "medical.gmother_m", label: "母方祖母" },
-    { group: "車", path: "car.body", label: "本体" },
-    { group: "車", path: "car.parking", label: "駐車場" },
-    { group: "車", path: "car.gas", label: "ガス代" },
-    { group: "車", path: "car.insurance", label: "保険" },
-    { group: "車", path: "car.tax", label: "税金" },
-    { group: "車", path: "car.inspection", label: "車検" },
-    { group: "車", path: "car.other", label: "他経費" },
-    { group: "他生活費", path: "living.food", label: "食費" },
-    { group: "他生活費", path: "living.utilities", label: "光熱費" },
-    { group: "他生活費", path: "living.communication", label: "通信費" },
-    { group: "他生活費", path: "living.daily_goods", label: "日用品・衣服" },
-    { group: "交際費・レジャー・その他・突発", path: "social", label: "交際費" },
-    { group: "交際費・レジャー・その他・突発", path: "leisure", label: "レジャー他" },
-    { group: "交際費・レジャー・その他・突発", path: "other", label: "その他" },
-    { group: "交際費・レジャー・その他・突発", path: "sudden", label: "突発" },
   ];
+  FREEFORM_LINK_GROUPS.forEach(({ sectionKey, group }) => {
+    (sim?.expense?.customRows?.[sectionKey] || []).forEach((r) => {
+      expense.push({ group, path: `custom:expense:${sectionKey}:${r.id}`, label: r.label || "（項目名未設定）" });
+    });
+  });
   const income = [
     { group: "収入", path: "father", label: "父" },
     { group: "収入", path: "mother", label: "母" },
-    { group: "収入", path: "taxRefund", label: "税還付金他" },
-    { group: "収入", path: "other_childAllowance", label: "子供手当等" },
-    { group: "収入", path: "pension_retirement", label: "年金・退職金" },
   ];
+  (sim?.income?.customRows || []).forEach((r) => {
+    income.push({ group: "収入", path: `custom:income::${r.id}`, label: r.label || "（項目名未設定）" });
+  });
   return { expense, income };
 }
 
+// "custom:<kind>:<sectionKeyOrEmpty>:<rowId>" 形式なら自由入力行を指す
+function parseCustomLinkPath(path) {
+  if (!path || !path.startsWith("custom:")) return null;
+  const [, kind, sectionKey, id] = path.split(":");
+  return { kind, sectionKey: sectionKey || null, id };
+}
+
 function getSimValueAtPath(sim, type, path, idx) {
+  const custom = parseCustomLinkPath(path);
+  if (custom) {
+    const list = custom.kind === "income" ? sim.income.customRows : sim.expense.customRows?.[custom.sectionKey];
+    const row = (list || []).find((r) => r.id === custom.id);
+    return row?.arr[idx] ?? 0;
+  }
   const keys = path.split(".");
   let obj = type === "income" ? sim.income : sim.expense;
   for (let k = 0; k < keys.length - 1; k++) obj = obj[keys[k]];
   return obj[keys[keys.length - 1]][idx] ?? 0;
 }
 function setSimValueAtPath(simDraft, type, path, idx, value) {
+  const custom = parseCustomLinkPath(path);
+  if (custom) {
+    const list = custom.kind === "income" ? simDraft.income.customRows : simDraft.expense.customRows?.[custom.sectionKey];
+    const row = (list || []).find((r) => r.id === custom.id);
+    if (row) row.arr[idx] = value;
+    return;
+  }
   const keys = path.split(".");
   let obj = type === "income" ? simDraft.income : simDraft.expense;
   for (let k = 0; k < keys.length - 1; k++) obj = obj[keys[k]];
   obj[keys[keys.length - 1]][idx] = value;
 }
 
-function LedgerCategoryEditor({ ledger, setLedger, params }) {
-  const { expense: expenseFields, income: incomeFields } = getLinkableFields(params);
+function LedgerCategoryEditor({ ledger, setLedger, params, sim }) {
+  const { expense: expenseFields, income: incomeFields } = getLinkableFields(params, sim);
   const fieldsFor = (type) => (type === "income" ? incomeFields : expenseFields);
 
   const updateCat = (id, patch) => setLedger((prev) => ({
@@ -5037,7 +5159,7 @@ function LedgerCategoryEditor({ ledger, setLedger, params }) {
   );
 }
 
-function LedgerInputTab({ ledger, setLedger, params }) {
+function LedgerInputTab({ ledger, setLedger, params, sim }) {
   const [year, setYear] = useState(new Date().getFullYear());
   const [showCategoryEditor, setShowCategoryEditor] = useState(false);
 
@@ -5079,7 +5201,7 @@ function LedgerInputTab({ ledger, setLedger, params }) {
       </div>
       {showCategoryEditor && (
         <div style={{ padding: "0 16px 14px" }}>
-          <LedgerCategoryEditor ledger={ledger} setLedger={setLedger} params={params} />
+          <LedgerCategoryEditor ledger={ledger} setLedger={setLedger} params={params} sim={sim} />
         </div>
       )}
 
@@ -5133,7 +5255,7 @@ function LedgerInputTab({ ledger, setLedger, params }) {
 function LedgerSummaryTab({ ledger, setLedger, sim, setSim, params }) {
   const [year, setYear] = useState(new Date().getFullYear());
   const [note, setNote] = useState("");
-  const { expense: expenseFields, income: incomeFields } = getLinkableFields(params);
+  const { expense: expenseFields, income: incomeFields } = getLinkableFields(params, sim);
   const fieldLabel = (type, path) => {
     const f = (type === "income" ? incomeFields : expenseFields).find((x) => x.path === path);
     return f ? `${f.group} ＞ ${f.label}` : path;
@@ -5314,7 +5436,7 @@ function LedgerApp({ sim, setSim, params, ledger, setLedger, onBack }) {
         }}>⬅ ライフポートフォリオへ</button>
       </div>
       <TabBar tabs={[{ key: "input", label: "入力" }, { key: "summary", label: "集計・グラフ" }]} active={ledgerTab} onChange={setLedgerTab} />
-      {ledgerTab === "input" && <LedgerInputTab ledger={ledger} setLedger={setLedger} params={params} />}
+      {ledgerTab === "input" && <LedgerInputTab ledger={ledger} setLedger={setLedger} params={params} sim={sim} />}
       {ledgerTab === "summary" && <LedgerSummaryTab ledger={ledger} setLedger={setLedger} sim={sim} setSim={setSim} params={params} />}
     </div>
   );
