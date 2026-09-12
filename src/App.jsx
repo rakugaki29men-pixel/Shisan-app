@@ -3155,6 +3155,8 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
   };
 
   const chartOverlayMode = !!params.chartOverlayMode;
+  // 現金がその年の支出合計まで下がり他金融資産を取り崩した警告は、その2資産が両方グラフに表示されているときだけ意味を持つ
+  const showCashFloorWarning = (params.showCashArea ?? true) && (params.showSecuritiesArea ?? true);
   const chartData = YEARS.map((y, i) => {
     // 積み上げ方式では不動産→現金→他金融資産の順に積み上がるため、その帯の下端を基準にする。
     // 重なり方式では各資産が0から独立して描かれるため、帯の下端は常に0になる。
@@ -3215,10 +3217,13 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
               <Area type="monotone" dataKey="他金融資産" stackId={chartOverlayMode ? undefined : "a"} stroke={GOLD} fill={GOLD} fillOpacity={0.55} />
             )}
             {/* 現金がその年の支出合計まで下がり金融資産を取り崩した期間だけ、他金融資産の帯を赤く重ね描きする（警告表示）。
-                他の帯のアニメーションが終わる頃に遅れてフェードインするよう、開始を遅らせている */}
-            <Area type="monotone" dataKey="cashFloorRange" stroke={SEAL} fill={SEAL} fillOpacity={0.65}
-              connectNulls={false} legendType="none" activeDot={false}
-              animationBegin={1300} animationDuration={600} animationEasing="ease-in" />
+                他の帯のアニメーションが終わる頃に遅れてフェードインするよう、開始を遅らせている。
+                現金・他金融資産の両方がグラフに表示されているときだけ意味のある警告なので、その場合のみ描画する */}
+            {showCashFloorWarning && (
+              <Area type="monotone" dataKey="cashFloorRange" stroke={SEAL} fill={SEAL} fillOpacity={0.65}
+                connectNulls={false} legendType="none" activeDot={false}
+                animationBegin={1300} animationDuration={600} animationEasing="ease-in" />
+            )}
             <Legend wrapperStyle={{ fontSize: 11 }} />
             <ReferenceDot x={peakYear} y={peakAsset} r={13} isFront shape={markerIcon("⭐", "peak")} />
             {negativeIdx >= 0 && (
@@ -3237,7 +3242,7 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
           ❌ 資金ショート：{YEARS[negativeIdx]}年に総資産がマイナス（{fmtMan(model.assetTotal[negativeIdx])}）になります
         </div>
       )}
-      {activeChartIdx != null && chartData[activeChartIdx]?.cashFloorHit && (
+      {showCashFloorWarning && activeChartIdx != null && chartData[activeChartIdx]?.cashFloorHit && (
         <div style={{ margin: "0 16px 10px", padding: "8px 10px", fontSize: 12, background: SEAL_SOFT, border: `1px solid ${SEAL}`, borderRadius: 4, color: INK }}>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>{chartData[activeChartIdx].year}年</div>
           <div>総資産：{fmtMan(chartData[activeChartIdx].総資産)}</div>
