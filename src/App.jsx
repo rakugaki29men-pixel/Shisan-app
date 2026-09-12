@@ -1147,26 +1147,55 @@ function RealEstateToggle({ params, setParams }) {
   );
 }
 
-function ChartDisplayControls({ params, setParams }) {
-  const checkboxLabelStyle = { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: INK_SOFT, cursor: "pointer" };
+// スマホの設定画面によくあるオン/オフのスライドスイッチ（チェックボックスではなく2択の切替に使う）
+function ToggleSwitch({ checked, onChange, offLabel, onLabel }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <RealEstateToggle params={params} setParams={setParams} />
-      <label style={checkboxLabelStyle}>
-        <input type="checkbox" checked={params.showCashArea ?? true}
-          onChange={(e) => setParams((p) => ({ ...p, showCashArea: e.target.checked }))} />
-        現金をグラフに表示する
-      </label>
-      <label style={checkboxLabelStyle}>
-        <input type="checkbox" checked={params.showSecuritiesArea ?? true}
-          onChange={(e) => setParams((p) => ({ ...p, showSecuritiesArea: e.target.checked }))} />
-        他金融資産をグラフに表示する
-      </label>
-      <label style={checkboxLabelStyle}>
-        <input type="checkbox" checked={!!params.chartOverlayMode}
-          onChange={(e) => setParams((p) => ({ ...p, chartOverlayMode: e.target.checked }))} />
-        積み上げず重ねて表示する（重なり方式）
-      </label>
+    <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+      {offLabel && <span style={{ fontSize: 11.5, color: checked ? INK_SOFT : INK, fontWeight: checked ? 400 : 600 }}>{offLabel}</span>}
+      <button type="button" role="switch" aria-checked={checked} onClick={() => onChange(!checked)} style={{
+        position: "relative", width: 38, height: 21, borderRadius: 11, border: "none", cursor: "pointer",
+        background: checked ? GOLD : "#CFC9B8", padding: 0, flexShrink: 0, transition: "background 0.2s",
+      }}>
+        <span style={{
+          position: "absolute", top: 2, left: checked ? 19 : 2, width: 17, height: 17, borderRadius: "50%",
+          background: "#fff", boxShadow: "0 1px 2px rgba(0,0,0,0.3)", transition: "left 0.2s",
+        }} />
+      </button>
+      {onLabel && <span style={{ fontSize: 11.5, color: checked ? INK : INK_SOFT, fontWeight: checked ? 600 : 400 }}>{onLabel}</span>}
+    </div>
+  );
+}
+
+function ChartDisplayControls({ params, setParams }) {
+  const checkboxLabelStyle = { display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, color: INK_SOFT, cursor: "pointer" };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 600, color: INK, marginBottom: 5 }}>表示資産</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 16px" }}>
+          <label style={checkboxLabelStyle}>
+            <input type="checkbox" checked={params.showCashArea ?? true}
+              onChange={(e) => setParams((p) => ({ ...p, showCashArea: e.target.checked }))} />
+            現金
+          </label>
+          <label style={checkboxLabelStyle}>
+            <input type="checkbox" checked={params.showSecuritiesArea ?? true}
+              onChange={(e) => setParams((p) => ({ ...p, showSecuritiesArea: e.target.checked }))} />
+            他金融資産
+          </label>
+          <label style={checkboxLabelStyle}>
+            <input type="checkbox" checked={params.includeRealEstate}
+              onChange={(e) => setParams((p) => ({ ...p, includeRealEstate: e.target.checked }))} />
+            不動産（売却試算額）
+          </label>
+        </div>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: INK }}>グラフ表示</div>
+        <ToggleSwitch checked={!!params.chartOverlayMode}
+          onChange={(v) => setParams((p) => ({ ...p, chartOverlayMode: v }))}
+          offLabel="積み上げ" onLabel="重なり" />
+      </div>
     </div>
   );
 }
@@ -3178,16 +3207,18 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
             <YAxis tick={{ fontSize: 10, fill: INK_SOFT }} />
             <Tooltip content={<AssetChartTooltip />} />
             <ReferenceLine y={0} stroke={INK} />
-            <Area type="monotone" dataKey="不動産" stackId={chartOverlayMode ? undefined : "a"} stroke={SUMI} fill={SUMI} fillOpacity={0.4} isAnimationActive={false} />
+            <Area type="monotone" dataKey="不動産" stackId={chartOverlayMode ? undefined : "a"} stroke={SUMI} fill={SUMI} fillOpacity={0.4} />
             {(params.showCashArea ?? true) && (
-              <Area type="monotone" dataKey="現金" stackId={chartOverlayMode ? undefined : "a"} stroke={"#8FA6C7"} fill={"#8FA6C7"} fillOpacity={0.55} isAnimationActive={false} />
+              <Area type="monotone" dataKey="現金" stackId={chartOverlayMode ? undefined : "a"} stroke={"#8FA6C7"} fill={"#8FA6C7"} fillOpacity={0.55} />
             )}
             {(params.showSecuritiesArea ?? true) && (
-              <Area type="monotone" dataKey="他金融資産" stackId={chartOverlayMode ? undefined : "a"} stroke={GOLD} fill={GOLD} fillOpacity={0.55} isAnimationActive={false} />
+              <Area type="monotone" dataKey="他金融資産" stackId={chartOverlayMode ? undefined : "a"} stroke={GOLD} fill={GOLD} fillOpacity={0.55} />
             )}
-            {/* 現金がその年の支出合計まで下がり金融資産を取り崩した期間だけ、他金融資産の帯を赤く重ね描きする（警告表示） */}
+            {/* 現金がその年の支出合計まで下がり金融資産を取り崩した期間だけ、他金融資産の帯を赤く重ね描きする（警告表示）。
+                他の帯のアニメーションが終わる頃に遅れてフェードインするよう、開始を遅らせている */}
             <Area type="monotone" dataKey="cashFloorRange" stroke={SEAL} fill={SEAL} fillOpacity={0.65}
-              connectNulls={false} legendType="none" isAnimationActive={false} activeDot={false} />
+              connectNulls={false} legendType="none" activeDot={false}
+              animationBegin={1300} animationDuration={600} animationEasing="ease-in" />
             <Legend wrapperStyle={{ fontSize: 11 }} />
             <ReferenceDot x={peakYear} y={peakAsset} r={13} isFront shape={markerIcon("⭐", "peak")} />
             {negativeIdx >= 0 && (
