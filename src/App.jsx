@@ -1035,6 +1035,7 @@ function computeModel(sim, params) {
 
   const expenseTotal = zeros(), incomeTotal = zeros(), balance = zeros();
   const dividend = zeros(), securities = zeros(), cash = zeros(), assetTotal = zeros(), otherAssets = zeros();
+  const cashFloorHit = zeros(); // 1 = その年、現金がその年の支出合計まで下がり金融資産を取り崩した
 
   for (let i = 0; i < N; i++) {
     expenseTotal[i] = tuition[i] + (exp.dorm[i] ?? 0) + medical[i] + sumCustomAt(cr.housing, i) + carTotal[i] +
@@ -1063,6 +1064,7 @@ function computeModel(sim, params) {
       if (cashCandidate < cashFloor) {
         cash[i] = cashFloor;
         securities[i] = (secPrev + cashCandidate - cashFloor) * params.growthRate + reinvested;
+        cashFloorHit[i] = 1;
       } else {
         cash[i] = cashCandidate;
         securities[i] = secPrev * params.growthRate + reinvested;
@@ -1078,7 +1080,7 @@ function computeModel(sim, params) {
   return {
     tuition, medical, carTotal, livingTotal, realEstateAsset, otherAssets,
     housingRate: housingPlan.rateArr,
-    expenseTotal, incomeTotal, balance, dividend, securities, cash, assetTotal,
+    expenseTotal, incomeTotal, balance, dividend, securities, cash, assetTotal, cashFloorHit,
   };
 }
 
@@ -2932,9 +2934,12 @@ function AssetChartTooltip({ active, payload, label }) {
     <div style={{ background: "#fff", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, padding: "8px 10px", fontSize: 12 }}>
       <div style={{ fontWeight: 600, color: INK, marginBottom: 4 }}>{label}年</div>
       <div style={{ color: INK, fontWeight: 600, marginBottom: 4 }}>総資産：{fmtMan(row.総資産)}</div>
-      {payload.map((p) => (
+      {payload.filter((p) => p.dataKey !== "cashFloorRange").map((p) => (
         <div key={p.dataKey} style={{ color: p.color }}>{p.dataKey}：{fmtMan(p.value)}</div>
       ))}
+      {row.cashFloorHit && (
+        <div style={{ color: SEAL, fontWeight: 600, marginTop: 4 }}>⚠ 現金がその年の支出合計まで低下、他金融資産を取り崩しています</div>
+      )}
     </div>
   );
 }
@@ -3087,16 +3092,22 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
     };
   };
 
-  const chartData = YEARS.map((y, i) => ({
-    year: y,
-    収入: Math.round(model.incomeTotal[i]),
-    支出: Math.round(model.expenseTotal[i]),
-    収支: Math.round(model.balance[i]),
-    他金融資産: Math.round(model.securities[i]),
-    現金: Math.round(model.cash[i]),
-    不動産: Math.round(model.realEstateAsset[i]),
-    総資産: Math.round(model.assetTotal[i]),
-  }));
+  const chartData = YEARS.map((y, i) => {
+    const cashFloorBase = Math.round(model.realEstateAsset[i] + model.cash[i]);
+    return {
+      year: y,
+      収入: Math.round(model.incomeTotal[i]),
+      支出: Math.round(model.expenseTotal[i]),
+      収支: Math.round(model.balance[i]),
+      他金融資産: Math.round(model.securities[i]),
+      現金: Math.round(model.cash[i]),
+      不動産: Math.round(model.realEstateAsset[i]),
+      総資産: Math.round(model.assetTotal[i]),
+      // 現金がその年の支出合計まで下がり金融資産を取り崩した年だけ、他金融資産の帯を赤く重ね描きする
+      cashFloorRange: model.cashFloorHit[i] ? [cashFloorBase, cashFloorBase + Math.round(model.securities[i])] : null,
+      cashFloorHit: !!model.cashFloorHit[i],
+    };
+  });
 
   const peakAsset = Math.max(...model.assetTotal);
   const peakYear = YEARS[model.assetTotal.indexOf(peakAsset)];
@@ -3133,6 +3144,9 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
             <Area type="monotone" dataKey="不動産" stackId="a" stroke={SUMI} fill={SUMI} fillOpacity={0.4} />
             <Area type="monotone" dataKey="現金" stackId="a" stroke={"#8FA6C7"} fill={"#8FA6C7"} fillOpacity={0.55} />
             <Area type="monotone" dataKey="他金融資産" stackId="a" stroke={GOLD} fill={GOLD} fillOpacity={0.55} />
+            {/* 現金がその年の支出合計まで下がり金融資産を取り崩した期間だけ、他金融資産の帯を赤く重ね描きする（警告表示） */}
+            <Area type="monotone" dataKey="cashFloorRange" stroke={SEAL} fill={SEAL} fillOpacity={0.65}
+              connectNulls={false} legendType="none" isAnimationActive={false} activeDot={false} />
             <Legend wrapperStyle={{ fontSize: 11 }} />
             <ReferenceDot x={peakYear} y={peakAsset} r={13} isFront shape={markerIcon("⭐", "peak")} />
             {negativeIdx >= 0 && (
@@ -3253,6 +3267,9 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
               ポートフォリオから転記済みの年：{Object.entries(params.securitiesActualOverrides).sort(([a], [b]) => a - b).map(([y, v]) => `${y}年(${fmt(v)}万円)`).join("、")}
             </div>
           )}
+          <div style={{ fontSize: 10.5, color: INK_SOFT, marginTop: 8, paddingTop: 8, borderTop: `1px dashed ${PAPER_LINE}` }}>
+            現金は、その年の支出合計額を下限として維持する設計です（生活防衛資金の考え方）。年間の支出額を下回りそうな分は、自動的に他金融資産（現金を除く金融資産）を取り崩して補います。上のグラフでは、実際に取り崩しが発生した期間の他金融資産の帯が赤く表示されます。
+          </div>
         </Accordion>
       </div>
     </div>
