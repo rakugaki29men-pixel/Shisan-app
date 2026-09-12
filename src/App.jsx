@@ -1746,9 +1746,14 @@ function RepairAndTaxFields({ plan, setPlan }) {
             <NumInput label="固定資産税評価額" value={plan.housingPlanAssessedValue} onChange={(v) => setPlan({ housingPlanAssessedValue: v })} suffix="万円" />
             <NumInput label="税率（年率）" value={(plan.housingPlanTaxRate * 100).toFixed(2)} onChange={(v) => setPlan({ housingPlanTaxRate: v / 100 })} width={90} suffix="%" />
           </div>
+          <div style={{ fontSize: 11, color: INK_SOFT, marginTop: 8 }}>
+            試算される固定資産税：<span style={{ fontSize: 14, fontWeight: 700, color: INK }}>
+              約{fmt(Math.round((plan.housingPlanAssessedValue || 0) * (plan.housingPlanTaxRate || 0) * 100) / 100)}万円/年
+            </span>（評価額×税率）
+          </div>
           {basePrice > 0 && (
-            <div style={{ fontSize: 11, color: INK_SOFT, marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-              参考値：<span style={{ fontSize: 14, fontWeight: 700, color: INK }}>約{fmt(suggestedAssessedValue)}万円</span>
+            <div style={{ fontSize: 11, color: INK_SOFT, marginTop: 6, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              評価額の参考値：約{fmt(suggestedAssessedValue)}万円
               （{plan.housingPlanBuyMode === "existing" ? "推定資産価値" : "物件価格"}の{Math.round(PROPERTY_TAX_DEFAULT_ASSESSMENT_RATIO * 100)}%を目安として算出）
               <button onClick={() => setPlan({ housingPlanAssessedValue: suggestedAssessedValue })}
                 style={{ fontSize: 11, padding: "3px 8px", borderRadius: 4, border: `1px solid ${GOLD}`, background: GOLD_SOFT, color: INK, cursor: "pointer" }}>
@@ -3083,7 +3088,7 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
     収入: Math.round(model.incomeTotal[i]),
     支出: Math.round(model.expenseTotal[i]),
     収支: Math.round(model.balance[i]),
-    金融資産: Math.round(model.securities[i]),
+    他金融資産: Math.round(model.securities[i]),
     現金: Math.round(model.cash[i]),
     不動産: Math.round(model.realEstateAsset[i]),
     総資産: Math.round(model.assetTotal[i]),
@@ -3121,9 +3126,9 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
             <YAxis tick={{ fontSize: 10, fill: INK_SOFT }} />
             <Tooltip content={<AssetChartTooltip />} />
             <ReferenceLine y={0} stroke={INK} />
-            <Area type="monotone" dataKey="金融資産" stackId="a" stroke={GOLD} fill={GOLD} fillOpacity={0.55} />
-            <Area type="monotone" dataKey="現金" stackId="a" stroke={"#8FA6C7"} fill={"#8FA6C7"} fillOpacity={0.55} />
             <Area type="monotone" dataKey="不動産" stackId="a" stroke={SUMI} fill={SUMI} fillOpacity={0.4} />
+            <Area type="monotone" dataKey="現金" stackId="a" stroke={"#8FA6C7"} fill={"#8FA6C7"} fillOpacity={0.55} />
+            <Area type="monotone" dataKey="他金融資産" stackId="a" stroke={GOLD} fill={GOLD} fillOpacity={0.55} />
             <Legend wrapperStyle={{ fontSize: 11 }} />
             <ReferenceDot x={peakYear} y={peakAsset} r={13} isFront shape={markerIcon("⭐", "peak")} />
             {negativeIdx >= 0 && (
@@ -3556,10 +3561,19 @@ function AddHoldingForm({ onAdd, fxRates, cashList, pendingAccountId, onRequestA
   const [typeFilter, setTypeFilter] = useState([]); // 空なら種類を絞らず全体から検索
   const toggleTypeFilter = (v) => setTypeFilter((prev) => prev.includes(v) ? prev.filter((x) => x !== v) : [...prev, v]);
 
+  // 投資信託は検索データ提供元（Yahoo Finance）に登録されていないため、
+  // 投信のみで絞り込んだ検索は何を入力しても基本的にヒットしない
+  const MUTUALFUND_UNSUPPORTED_NOTE = "投資信託は検索データ提供元（Yahoo Finance）に登録されていないため、名称を変えても基本的に検索でヒットしません。お手数ですが「見つからない場合は直接入力する」から手入力でご登録ください。";
+
   const search = async () => {
     if (!query.trim()) return;
     if (!PRICE_API_BASE) {
       setError("銘柄検索サーバーが設定されていません。今は「銘柄を手入力する」をご利用ください。");
+      return;
+    }
+    if (typeFilter.length === 1 && typeFilter[0] === "MUTUALFUND") {
+      setError(MUTUALFUND_UNSUPPORTED_NOTE);
+      setCandidates([]);
       return;
     }
     setSearching(true); setError(""); setCandidates(null); setPicked(null);
@@ -3611,10 +3625,11 @@ function AddHoldingForm({ onAdd, fxRates, cashList, pendingAccountId, onRequestA
   };
 
   const addManually = () => {
-    setPicked({
-      name: query.trim() || "新しい銘柄", exchange: "", ticker: "",
-      currency: "JPY", assetCat: "その他", tags: starterTagsFor("その他", "個別銘柄"), subClass: null, memo: "",
-    });
+    // 投信のみで絞り込んでいた場合は、投資信託として登録しやすいよう初期値を寄せておく
+    const wantsFund = typeFilter.length === 1 && typeFilter[0] === "MUTUALFUND";
+    setPicked(wantsFund
+      ? { name: query.trim() || "新しい投資信託", exchange: "", ticker: "", currency: "JPY", assetCat: "株式", tags: starterTagsFor("株式", "投信"), subClass: null, memo: "" }
+      : { name: query.trim() || "新しい銘柄", exchange: "", ticker: "", currency: "JPY", assetCat: "その他", tags: starterTagsFor("その他", "個別銘柄"), subClass: null, memo: "" });
     setQtyInput("1"); setPriceInput(""); setPriceNote("");
     setError(""); setCandidates(null);
   };
@@ -3677,8 +3692,13 @@ function AddHoldingForm({ onAdd, fxRates, cashList, pendingAccountId, onRequestA
             ))}
             {typeFilter.length === 0 && <span style={{ fontSize: 10, color: INK_SOFT }}>（未選択＝すべてから検索）</span>}
           </div>
+          {typeFilter.includes("MUTUALFUND") && (
+            <div style={{ fontSize: 10.5, color: INK_SOFT, marginTop: -4, marginBottom: 8 }}>
+              ※投資信託は検索データ提供元に登録されていないため、基本的に検索でヒットしません。見つからない場合は「直接入力する」からご登録ください。
+            </div>
+          )}
           <div style={{ display: "flex", gap: 6 }}>
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="例：Apple, AAPL, eMAXIS 先進国, ビットコイン"
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="例：Apple, AAPL, VOO, ビットコイン"
               onKeyDown={(e) => e.key === "Enter" && search()}
               style={{ flex: 1, fontSize: 12.5, padding: "7px 8px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4 }} />
             <button onClick={search} disabled={searching} style={{
@@ -3919,10 +3939,14 @@ function HoldingCard({ h, idx, onUpdate, onDelete, fxRates, fmtCur = fmtYen, cas
   const displayQty = h.qtyMode === "nav10000" ? h.unitsImplied : h.qty;
   const linkedCashRow = h.linkedCashId ? cashList.find((c) => c.id === h.linkedCashId) : null;
   const isPickingAccount = cashLink && cashLink.mode === "account" && cashLink.holdingIdx === idx && cashLink.cashIdx === null;
+  // 保有数量ゼロはグレー、価格自動反映の対象銘柄は少し濃い背景で見分けやすくする
+  const isEmpty = !(displayQty > 0);
+  const cardBg = isEmpty ? "#EFEFEF" : h.autoFetchable ? PAPER : "#fff";
+  const nameColor = isEmpty ? INK_SOFT : INK;
 
   return (
     <div ref={(el) => { onCardRef?.(idx, el); setDragRef?.(el); }} style={{
-      border: `1px solid ${PAPER_LINE}`, borderRadius: 4, overflow: "hidden", background: "#fff",
+      border: `1px solid ${PAPER_LINE}`, borderRadius: 4, overflow: "hidden", background: cardBg,
       boxShadow: isDragging ? "0 2px 8px rgba(0,0,0,0.18)" : "none",
     }}>
       <div style={{ display: "flex", alignItems: "stretch" }}>
@@ -3932,7 +3956,7 @@ function HoldingCard({ h, idx, onUpdate, onDelete, fxRates, fmtCur = fmtYen, cas
           display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8,
         }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: INK, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: nameColor, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {h.ticker ? `${h.ticker} ` : ""}{h.name}
           </div>
           {h.nameJa && (
