@@ -512,6 +512,9 @@ function rawDefaultParamsState() {
     fxRate: RAW.portfolio.usdjpy || 150,
     fxRates: { USD: RAW.portfolio.usdjpy || 150 },
     reinvestDividends: false,
+    showCashArea: true,
+    showSecuritiesArea: true,
+    chartOverlayMode: false,
     securitiesActualOverrides: {}, // { [year]: 万円 } - ポートフォリオから転記した実績値。その年からその値を起点に再計算する
     simStartYear: RAW.sim.years[0],
     wageGrowthRate: 0,
@@ -1141,6 +1144,30 @@ function RealEstateToggle({ params, setParams }) {
         onChange={(e) => setParams((p) => ({ ...p, includeRealEstate: e.target.checked }))} />
       不動産（売却試算額）を総資産に含める
     </label>
+  );
+}
+
+function ChartDisplayControls({ params, setParams }) {
+  const checkboxLabelStyle = { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: INK_SOFT, cursor: "pointer" };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <RealEstateToggle params={params} setParams={setParams} />
+      <label style={checkboxLabelStyle}>
+        <input type="checkbox" checked={params.showCashArea ?? true}
+          onChange={(e) => setParams((p) => ({ ...p, showCashArea: e.target.checked }))} />
+        現金をグラフに表示する
+      </label>
+      <label style={checkboxLabelStyle}>
+        <input type="checkbox" checked={params.showSecuritiesArea ?? true}
+          onChange={(e) => setParams((p) => ({ ...p, showSecuritiesArea: e.target.checked }))} />
+        他金融資産をグラフに表示する
+      </label>
+      <label style={checkboxLabelStyle}>
+        <input type="checkbox" checked={!!params.chartOverlayMode}
+          onChange={(e) => setParams((p) => ({ ...p, chartOverlayMode: e.target.checked }))} />
+        積み上げず重ねて表示する（重なり方式）
+      </label>
+    </div>
   );
 }
 
@@ -2942,9 +2969,6 @@ function AssetChartTooltip({ active, payload, label }) {
       {payload.filter((p) => p.dataKey !== "cashFloorRange").map((p) => (
         <div key={p.dataKey} style={{ color: p.color }}>{p.dataKey}：{fmtMan(p.value)}</div>
       ))}
-      {row.cashFloorHit && (
-        <div style={{ color: SEAL, fontWeight: 600, marginTop: 4 }}>⚠ 現金がその年の支出合計まで低下、他金融資産を取り崩しています</div>
-      )}
     </div>
   );
 }
@@ -2953,6 +2977,10 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
   const model = useMemo(() => computeModel(sim, params), [sim, params]);
   const [activeMarker, setActiveMarker] = useState(null);
   const [showScenario, setShowScenario] = useState(false);
+  const [activeChartIdx, setActiveChartIdx] = useState(null);
+  const handleChartActivate = (state) => {
+    if (state && state.activeTooltipIndex != null) setActiveChartIdx(state.activeTooltipIndex);
+  };
 
   // 現在の保有比率（アセットクラスごと）を、金融資産の推移にそのまま当てはめた試算表示
   const classWeights = useMemo(() => {
@@ -3097,8 +3125,11 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
     };
   };
 
+  const chartOverlayMode = !!params.chartOverlayMode;
   const chartData = YEARS.map((y, i) => {
-    const cashFloorBase = Math.round(model.realEstateAsset[i] + model.cash[i]);
+    // 積み上げ方式では不動産→現金→他金融資産の順に積み上がるため、その帯の下端を基準にする。
+    // 重なり方式では各資産が0から独立して描かれるため、帯の下端は常に0になる。
+    const cashFloorBase = chartOverlayMode ? 0 : Math.round(model.realEstateAsset[i] + model.cash[i]);
     return {
       year: y,
       収入: Math.round(model.incomeTotal[i]),
@@ -3140,15 +3171,20 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
 
       <div style={{ padding: "0 16px", height: 250, background: CARD, marginBottom: 4 }}>
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={chartData} margin={{ top: 14, right: 8, left: -18, bottom: 0 }}>
+          <AreaChart data={chartData} margin={{ top: 14, right: 8, left: -18, bottom: 0 }}
+            onMouseMove={handleChartActivate} onClick={handleChartActivate}>
             <CartesianGrid stroke={PAPER_LINE} vertical={false} />
             <XAxis dataKey="year" tick={{ fontSize: 10, fill: INK_SOFT }} interval={4} />
             <YAxis tick={{ fontSize: 10, fill: INK_SOFT }} />
             <Tooltip content={<AssetChartTooltip />} />
             <ReferenceLine y={0} stroke={INK} />
-            <Area type="monotone" dataKey="不動産" stackId="a" stroke={SUMI} fill={SUMI} fillOpacity={0.4} />
-            <Area type="monotone" dataKey="現金" stackId="a" stroke={"#8FA6C7"} fill={"#8FA6C7"} fillOpacity={0.55} />
-            <Area type="monotone" dataKey="他金融資産" stackId="a" stroke={GOLD} fill={GOLD} fillOpacity={0.55} />
+            <Area type="monotone" dataKey="不動産" stackId={chartOverlayMode ? undefined : "a"} stroke={SUMI} fill={SUMI} fillOpacity={0.4} isAnimationActive={false} />
+            {(params.showCashArea ?? true) && (
+              <Area type="monotone" dataKey="現金" stackId={chartOverlayMode ? undefined : "a"} stroke={"#8FA6C7"} fill={"#8FA6C7"} fillOpacity={0.55} isAnimationActive={false} />
+            )}
+            {(params.showSecuritiesArea ?? true) && (
+              <Area type="monotone" dataKey="他金融資産" stackId={chartOverlayMode ? undefined : "a"} stroke={GOLD} fill={GOLD} fillOpacity={0.55} isAnimationActive={false} />
+            )}
             {/* 現金がその年の支出合計まで下がり金融資産を取り崩した期間だけ、他金融資産の帯を赤く重ね描きする（警告表示） */}
             <Area type="monotone" dataKey="cashFloorRange" stroke={SEAL} fill={SEAL} fillOpacity={0.65}
               connectNulls={false} legendType="none" isAnimationActive={false} activeDot={false} />
@@ -3170,8 +3206,18 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
           ❌ 資金ショート：{YEARS[negativeIdx]}年に総資産がマイナス（{fmtMan(model.assetTotal[negativeIdx])}）になります
         </div>
       )}
+      {activeChartIdx != null && chartData[activeChartIdx]?.cashFloorHit && (
+        <div style={{ margin: "0 16px 10px", padding: "8px 10px", fontSize: 12, background: SEAL_SOFT, border: `1px solid ${SEAL}`, borderRadius: 4, color: INK }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>{chartData[activeChartIdx].year}年</div>
+          <div>総資産：{fmtMan(chartData[activeChartIdx].総資産)}</div>
+          <div>不動産：{fmtMan(chartData[activeChartIdx].不動産)}</div>
+          <div>現金：{fmtMan(chartData[activeChartIdx].現金)}</div>
+          <div>他金融資産：{fmtMan(chartData[activeChartIdx].他金融資産)}</div>
+          <div style={{ color: SEAL, fontWeight: 600, marginTop: 4 }}>⚠ 現金がその年の支出合計まで低下、他金融資産を取り崩しています</div>
+        </div>
+      )}
       <div style={{ padding: "4px 16px 0" }}>
-        <RealEstateToggle params={params} setParams={setParams} />
+        <ChartDisplayControls params={params} setParams={setParams} />
       </div>
       <div style={{ padding: "8px 16px 0", height: 210, background: CARD, marginBottom: 18, marginTop: 10 }}>
         <ResponsiveContainer width="100%" height="100%">
