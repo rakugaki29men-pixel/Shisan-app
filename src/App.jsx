@@ -1056,11 +1056,15 @@ function computeModel(sim, params) {
       const cashPrev = cash[i - 1];
       const secPrev = securities[i - 1];
       const reinvested = params.reinvestDividends ? dividend[i] : 0;
-      if (cashPrev + balance[i] < 0) {
-        cash[i] = 0;
-        securities[i] = (secPrev + cashPrev + balance[i]) * params.growthRate + reinvested;
+      // 現金の下限は0円ではなく「その年の支出合計」とする（生活防衛資金の目安として、
+      // それを下回りそうな分は金融資産を取り崩して補う）
+      const cashFloor = expenseTotal[i];
+      const cashCandidate = cashPrev + balance[i];
+      if (cashCandidate < cashFloor) {
+        cash[i] = cashFloor;
+        securities[i] = (secPrev + cashCandidate - cashFloor) * params.growthRate + reinvested;
       } else {
-        cash[i] = cashPrev + balance[i];
+        cash[i] = cashCandidate;
         securities[i] = secPrev * params.growthRate + reinvested;
       }
     }
