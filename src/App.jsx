@@ -1434,6 +1434,33 @@ const CAR_BANDS = {
 };
 const CAR_SOURCE_NOTE = "任意保険・ガソリン代はSBI損保／イオン銀行の調査、税金は総排気量に応じた自動車税の目安値を参照。駐車場代は地域差が非常に大きいため含めていません。";
 
+// 生活費ウィザード：総務省「家計調査」の消費支出平均から、このアプリで別入力している
+// 住居費を差し引いた「他生活費」の目安を算出する（教育費は差し引いていないため、
+// 学費が別途大きい家庭ではやや多めに出ることがある＝Option A方式の既知の誤差）
+const LIVING_MONTHLY_HOUSING_AVG = 1.8; // 万円/月（総務省 家計調査 2024年12月分・二人以上世帯の「住居」平均）
+const LIVING_BANDS = {
+  multi: { label: "二人以上世帯", monthlyTotal: 30.0, source: "総務省 家計調査（家計収支編）2024年平均：二人以上世帯の消費支出 月30.0万円" },
+  soloUnder35: { label: "単身世帯・34歳以下", monthlyTotal: 17.6, source: "同 単身世帯・34歳以下：消費支出 月17.6万円" },
+  solo35to59: { label: "単身世帯・35〜59歳", monthlyTotal: 18.5, source: "同 単身世帯・35〜59歳：消費支出 月18.5万円" },
+  solo60plus: { label: "単身世帯・60歳以上", monthlyTotal: 15.9, source: "同 単身世帯・60歳以上：消費支出 月15.9万円" },
+};
+const LIVING_SOURCE_NOTE = "総務省「家計調査」の消費支出平均から、住居費の全国平均（月1.8万円）を差し引いた金額を年額の目安として算出しています。教育費（学費）は差し引いていないため、学費が別途大きい家庭では少し多めに出る場合があります。実額との差は「一覧」タブで調整してください。";
+const WIZARD_LIVING_ROW_ID = "wizard_living_auto";
+
+// 医療・介護費ウィザード：年齢階級別の一人当たり医療費（厚労省）と、
+// 介護費用の全国平均（生命保険文化センター）を使って年ごとの目安を試算する
+const MEDICAL_COST_UNDER65 = 20.95; // 万円/年・一人当たり（令和4年度国民医療費、厚生労働省：65歳未満）
+const MEDICAL_COST_65PLUS = 77.59; // 万円/年・一人当たり（同：65歳以上）
+const MEDICAL_SOURCE_NOTE = "令和4年度 国民医療費（厚生労働省）の人口一人当たり医療費：65歳未満 年20.95万円／65歳以上 年77.59万円。「我々」は父・母それぞれの年齢で判定し合算します。";
+const CARE_BANDS = {
+  home: { label: "在宅介護", monthly: 5.3 },
+  facility: { label: "施設介護", monthly: 13.8 },
+};
+const CARE_ONETIME_AVG = 47.2; // 万円（一時費用：住宅改修・介護用品購入等）
+const CARE_DEFAULT_DURATION_YEARS = 5; // 平均介護期間 55.0ヶ月（約4年7ヶ月）を切り上げ
+const CARE_SOURCE_NOTE = "生命保険文化センター「2024年度 生命保険に関する全国実態調査」：介護の一時費用 平均47.2万円、月額費用 在宅5.3万円／施設13.8万円、平均介護期間 55.0ヶ月（約4年7ヶ月）。";
+const MEDICAL_ROW_LABELS = { us: "我々", gfather_p: "父方祖父", gmother_p: "父方祖母", gfather_m: "母方祖父", gmother_m: "母方祖母" };
+
 // 修繕費試算：戸建ては築年数に応じた修繕イベント（外壁・屋根・給湯器等）の目安、
 // マンションは専有面積に応じた修繕積立金の目安（30年周期で繰り返す想定）
 const HOUSE_REPAIR_CYCLE_YEARS = 30;
@@ -2162,12 +2189,180 @@ function CarWizardSlide({ sim, setSim }) {
   );
 }
 
+function LivingWizardSlide({ sim, setSim }) {
+  const thisYear = new Date().getFullYear();
+  const [band, setBand] = useState("multi");
+  const [applied, setApplied] = useState("");
+
+  const monthlyOther = Math.max(0, (LIVING_BANDS[band].monthlyTotal || 0) - LIVING_MONTHLY_HOUSING_AVG);
+  const annual = Math.round(monthlyOther * 12 * 10) / 10;
+
+  const apply = () => {
+    setSim((prev) => {
+      const next = clone(prev);
+      next.expense.customRows = next.expense.customRows || {};
+      const rows = (next.expense.customRows.living || []).slice();
+      let row = rows.find((r) => r.id === WIZARD_LIVING_ROW_ID);
+      if (!row) { row = { id: WIZARD_LIVING_ROW_ID, label: "生活費（自動試算）", arr: zeros() }; rows.push(row); }
+      YEARS.forEach((y, idx) => { if (y >= thisYear) row.arr[idx] = annual; });
+      next.expense.customRows.living = rows;
+      return next;
+    });
+    setApplied("反映しました。「シミュレーション」タブの「他生活費」に「生活費（自動試算）」の行を追加・更新しました。既に他の行がある場合は重複していないかご確認ください。");
+    setTimeout(() => setApplied(""), 8000);
+  };
+
+  return (
+    <div>
+      <p style={{ fontSize: 12.5, color: INK_SOFT, margin: "0 0 14px" }}>
+        世帯タイプを選ぶと、総務省「家計調査」の消費支出平均から住居費を差し引いた金額を、今年以降の「他生活費」に一括反映します。合わなければ反映後に「一覧」タブで調整してください。
+      </p>
+      <PillChoice
+        value={band}
+        onChange={setBand}
+        options={Object.entries(LIVING_BANDS).map(([k, b]) => ({ label: b.label, value: k }))}
+      />
+      <WizardRefBox>
+        {LIVING_BANDS[band].source}
+        <br />
+        {LIVING_SOURCE_NOTE}
+      </WizardRefBox>
+      <div style={{ fontSize: 13, color: INK, fontWeight: 600, margin: "12px 0" }}>
+        年額の目安：{fmt(annual)}万円（月額 {fmt(LIVING_BANDS[band].monthlyTotal, 1)}万円 − 住居費目安 {fmt(LIVING_MONTHLY_HOUSING_AVG, 1)}万円）
+      </div>
+      <button onClick={apply} style={{ fontSize: 13, padding: "10px 18px", borderRadius: 5, border: "none", background: GOLD, color: "#fff", fontWeight: 600, cursor: "pointer" }}>
+        生活費の設定を反映
+      </button>
+      <WizardAppliedNote text={applied} />
+    </div>
+  );
+}
+
+function MedicalWizardSlide({ sim, setSim, family }) {
+  const thisYear = new Date().getFullYear();
+  const father = family.find((m) => m.id === "father");
+  const mother = family.find((m) => m.id === "mother");
+  const targets = ["us", "gfather_p", "gmother_p", "gfather_m", "gmother_m"];
+  const [applied, setApplied] = useState("");
+  const [careTarget, setCareTarget] = useState("gfather_p");
+  const [careMode, setCareMode] = useState("home");
+  const [careCustomMonthly, setCareCustomMonthly] = useState(0);
+  const [careStartYear, setCareStartYear] = useState(String(thisYear));
+  const [careDurationYears, setCareDurationYears] = useState(CARE_DEFAULT_DURATION_YEARS);
+
+  // 年ごとの一人当たり医療費（年齢が分かる場合のみ算出。祖父母は個人、我々は父・母を合算）
+  const rateForAge = (age) => (age == null ? null : age < 65 ? MEDICAL_COST_UNDER65 : MEDICAL_COST_65PLUS);
+  const buildArr = (key) => YEARS.map((y) => {
+    if (key === "us") {
+      const fRate = father?.birthYear != null ? rateForAge(y - father.birthYear) : null;
+      const mRate = mother?.birthYear != null ? rateForAge(y - mother.birthYear) : null;
+      if (fRate == null && mRate == null) return null;
+      return Math.round(((fRate || 0) + (mRate || 0)) * 10) / 10;
+    }
+    const m = family.find((mm) => mm.id === key);
+    if (!m || m.birthYear == null) return null;
+    return rateForAge(y - m.birthYear);
+  });
+
+  const applyBase = () => {
+    setSim((prev) => {
+      const next = clone(prev);
+      targets.forEach((key) => {
+        const arr = buildArr(key);
+        const target = next.expense.medical[key];
+        YEARS.forEach((y, idx) => { if (y >= thisYear && arr[idx] != null) target[idx] = arr[idx]; });
+      });
+      return next;
+    });
+    setApplied("反映しました。「シミュレーション」タブの「医療・介護」で年ごとの数値を確認・微調整できます。");
+    setTimeout(() => setApplied(""), 8000);
+  };
+
+  const applyCare = () => {
+    const monthly = careMode === "custom" ? (careCustomMonthly || 0) : CARE_BANDS[careMode].monthly;
+    const startYearNum = parseInt(careStartYear, 10);
+    if (isNaN(startYearNum)) return;
+    setSim((prev) => {
+      const next = clone(prev);
+      const target = next.expense.medical[careTarget];
+      YEARS.forEach((y, idx) => {
+        if (y < thisYear) return;
+        if (y === startYearNum) target[idx] = (target[idx] || 0) + CARE_ONETIME_AVG + monthly * 12;
+        else if (y > startYearNum && y < startYearNum + (careDurationYears || 0)) target[idx] = (target[idx] || 0) + monthly * 12;
+      });
+      return next;
+    });
+    setApplied(`介護費を「${MEDICAL_ROW_LABELS[careTarget]}」の${careStartYear}年〜${startYearNum + (careDurationYears || 0) - 1}年に上乗せしました。既存の医療費に加算されています。`);
+    setTimeout(() => setApplied(""), 8000);
+  };
+
+  const missingIds = targets.filter((key) => {
+    if (key === "us") return father?.birthYear == null && mother?.birthYear == null;
+    const m = family.find((mm) => mm.id === key);
+    return !m || m.birthYear == null;
+  });
+
+  return (
+    <div>
+      <p style={{ fontSize: 12.5, color: INK_SOFT, margin: "0 0 14px" }}>
+        家族構成で設定した生年から、年齢階級別の一人当たり医療費を今年以降の「我々」「祖父母」それぞれの行に一括反映します。生年が未設定の対象はスキップされます。
+      </p>
+      {missingIds.length > 0 && (
+        <div style={{ fontSize: 12, color: SEAL, background: SEAL_SOFT, borderRadius: 4, padding: "8px 10px", marginBottom: 14 }}>
+          生年が未設定です：{missingIds.map((k) => MEDICAL_ROW_LABELS[k]).join("、")}。先に「👪 家族構成」で生年を入力してください（未設定のままでも他の対象だけ反映できます）。
+        </div>
+      )}
+      <WizardRefBox>{MEDICAL_SOURCE_NOTE}</WizardRefBox>
+      <button onClick={applyBase} style={{ fontSize: 13, padding: "10px 18px", borderRadius: 5, border: "none", background: GOLD, color: "#fff", fontWeight: 600, cursor: "pointer", marginTop: 12 }}>
+        医療費の設定を反映
+      </button>
+
+      <div style={{ fontSize: 13, fontWeight: 700, color: INK, margin: "22px 0 8px", paddingTop: 14, borderTop: `1px dashed ${PAPER_LINE}` }}>介護費を追加する（任意）</div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 8 }}>
+        <label style={{ fontSize: 11.5, display: "flex", flexDirection: "column", gap: 4 }}>
+          対象
+          <select value={careTarget} onChange={(e) => setCareTarget(e.target.value)}
+            style={{ padding: "6px 8px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, fontSize: 12.5 }}>
+            {targets.map((k) => <option key={k} value={k}>{MEDICAL_ROW_LABELS[k]}</option>)}
+          </select>
+        </label>
+        <label style={{ fontSize: 11.5, display: "flex", flexDirection: "column", gap: 4 }}>
+          開始年
+          <input type="number" value={careStartYear} onChange={(e) => setCareStartYear(e.target.value)}
+            style={{ width: 90, padding: "6px 8px", border: `1px solid ${PAPER_LINE}`, borderRadius: 4, fontVariantNumeric: "tabular-nums" }} />
+        </label>
+        <NumInput label="期間" value={careDurationYears} onChange={setCareDurationYears} width={70} suffix="年" />
+      </div>
+      <PillChoice
+        value={careMode}
+        onChange={setCareMode}
+        options={[
+          ...Object.entries(CARE_BANDS).map(([k, b]) => ({ label: `${b.label}（月${fmt(b.monthly)}万円）`, value: k })),
+          { label: "自由入力（月額）", value: "custom" },
+        ]}
+      />
+      {careMode === "custom" && (
+        <div style={{ marginTop: 8 }}>
+          <NumInput label="月額" value={careCustomMonthly} onChange={setCareCustomMonthly} suffix="万円/月" />
+        </div>
+      )}
+      <WizardRefBox>{CARE_SOURCE_NOTE} 開始年に一時費用（平均{fmt(CARE_ONETIME_AVG)}万円）をまとめて加算し、以降は月額×12ヶ月を期間分加算します。</WizardRefBox>
+      <button onClick={applyCare} style={{ fontSize: 13, padding: "10px 18px", borderRadius: 5, border: "none", background: SEAL, color: "#fff", fontWeight: 600, cursor: "pointer", marginTop: 12 }}>
+        介護費を追加
+      </button>
+      <WizardAppliedNote text={applied} />
+    </div>
+  );
+}
+
 function CostWizardModal({ sim, setSim, params, setParams, family, onClose, initialStep }) {
   const [step, setStep] = useState(initialStep || "tuition");
   const steps = [
     { key: "tuition", label: "① 学費" },
     { key: "housing", label: "② 住宅" },
     { key: "car", label: "③ 車" },
+    { key: "living", label: "④ 生活費" },
+    { key: "medical", label: "⑤ 医療・介護" },
   ];
   return (
     <div style={{ position: "fixed", inset: 0, background: PAPER, zIndex: 200, overflowY: "auto", fontFamily: "'Noto Sans JP','Hiragino Sans',sans-serif" }}>
@@ -2188,6 +2383,8 @@ function CostWizardModal({ sim, setSim, params, setParams, family, onClose, init
         {step === "tuition" && <TuitionWizardSlide sim={sim} setSim={setSim} family={family} />}
         {step === "housing" && <HousingWizardSlide sim={sim} setSim={setSim} params={params} setParams={setParams} />}
         {step === "car" && <CarWizardSlide sim={sim} setSim={setSim} />}
+        {step === "living" && <LivingWizardSlide sim={sim} setSim={setSim} />}
+        {step === "medical" && <MedicalWizardSlide sim={sim} setSim={setSim} family={family} />}
       </div>
     </div>
   );
@@ -3342,7 +3539,7 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
             ...customRowsBlock("expense", "tuition").rows,
           ]} addButton={customRowsBlock("expense", "tuition").addButton} />
         </Accordion>
-        <Accordion title="医療・介護" colorKey="medical">
+        <Accordion title="医療・介護" colorKey="medical" onWizard={() => onOpenWizard("medical")} wizardLabel="医療・介護費ウィザード">
           <EditTable rows={[
             { label: "我々", arr: sim.expense.medical.us, onChange: mk("medical.us") },
             { label: "父方祖父", arr: sim.expense.medical.gfather_p, onChange: mk("medical.gfather_p") },
@@ -3361,7 +3558,7 @@ function SimulationTab({ sim, setSim, params, setParams, scenario, setScenario, 
         <Accordion title="車" colorKey="car" onWizard={() => onOpenWizard("car")} wizardLabel="車ウィザード">
           <EditTable rows={customRowsBlock("expense", "car").rows} addButton={customRowsBlock("expense", "car").addButton} />
         </Accordion>
-        <Accordion title="他生活費" colorKey="living">
+        <Accordion title="他生活費" colorKey="living" onWizard={() => onOpenWizard("living")} wizardLabel="生活費ウィザード">
           <EditTable rows={customRowsBlock("expense", "living").rows} addButton={customRowsBlock("expense", "living").addButton} />
         </Accordion>
         <Accordion title="交際費・レジャー・その他・突発" colorKey="social">
