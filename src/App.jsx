@@ -503,6 +503,12 @@ function rawDefaultParamsState() {
     housingPlanBuyMode: "new", // "new"：新規購入として計算／"existing"：今のローン残高から計算
     housingPlanBalance: 0, // 返済中の場合の、基準年時点のローン残高
     housingPlanAssetValue: 0, // 返済中の場合の、物件の推定資産価値（任意）
+    housingPlanRepairEnabled: false,
+    housingPlanCompletionYear: new Date().getFullYear(),
+    housingPlanFloorAreaSqm: 70,
+    housingPlanTaxEnabled: false,
+    housingPlanAssessedValue: 0,
+    housingPlanTaxRate: PROPERTY_TAX_DEFAULT_RATE,
     housingPlanPurchaseYear: new Date().getFullYear(),
     housingPlanPrice: 0,
     housingPlanDownPayment: 0,
@@ -1264,6 +1270,38 @@ const CAR_BANDS = {
 };
 const CAR_SOURCE_NOTE = "任意保険・ガソリン代はSBI損保／イオン銀行の調査、税金は総排気量に応じた自動車税の目安値を参照。駐車場代は地域差が非常に大きいため含めていません。";
 
+// 修繕費試算：戸建ては築年数に応じた修繕イベント（外壁・屋根・給湯器等）の目安、
+// マンションは専有面積に応じた修繕積立金の目安（30年周期で繰り返す想定）
+const HOUSE_REPAIR_CYCLE_YEARS = 30;
+const HOUSE_REPAIR_EVENTS = { 10: 60, 15: 120, 25: 150, 0: 60 }; // { 築年数: 万円 }（0は30/60年目などの節目）
+const HOUSE_REPAIR_BASE_ANNUAL = 5; // 万円/年（上記以外の年の日常的な小修繕の目安）
+const HOUSE_REPAIR_SOURCE = "戸建て30年間の修繕総額の目安：500万〜1,200万円（築10年目に給湯器・防蟻、築15〜20年目に外壁・屋根の出費が集中する傾向。30年周期で概算し、以降も繰り返す想定）。あくまで目安のため、反映後に自由に金額を調整してください。";
+const CONDO_REPAIR_MONTHLY_PER_SQM = 0.025; // 万円/㎡/月（月250円の目安）
+const CONDO_REPAIR_SOURCE = "マンション修繕積立金の目安：専有面積1㎡あたり月200〜300円（国土交通省ガイドライン）。";
+
+function calcHouseRepairSchedule(completionYear) {
+  return YEARS.map((y) => {
+    const yrsSince = y - completionYear;
+    if (yrsSince <= 0) return 0; // 竣工年そのものは新築のため修繕費なしとする
+    const cyclePos = yrsSince % HOUSE_REPAIR_CYCLE_YEARS;
+    return HOUSE_REPAIR_EVENTS[cyclePos] ?? HOUSE_REPAIR_BASE_ANNUAL;
+  });
+}
+function calcCondoRepairSchedule(completionYear, floorAreaSqm) {
+  const annual = Math.round((floorAreaSqm || 0) * CONDO_REPAIR_MONTHLY_PER_SQM * 12 * 100) / 100;
+  return YEARS.map((y) => (y >= completionYear ? annual : 0));
+}
+
+// 固定資産税試算：固定資産税評価額（市場価格の目安6〜7割）に標準税率をかけて概算する
+const PROPERTY_TAX_DEFAULT_RATE = 0.014;
+const PROPERTY_TAX_DEFAULT_ASSESSMENT_RATIO = 0.7;
+const PROPERTY_TAX_SOURCE = "固定資産税は「固定資産税評価額 × 税率（標準1.4%）」で概算します。評価額は市場価格・資産価値の目安6〜7割程度ですが、実際は自治体の課税明細書で確認してください。";
+
+function calcPropertyTaxSchedule(startYear, assessedValue, rate) {
+  const annual = Math.round((assessedValue || 0) * (rate || 0) * 100) / 100;
+  return YEARS.map((y) => (y >= startYear ? annual : 0));
+}
+
 function PillChoice({ options, value, onChange }) {
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -1575,6 +1613,58 @@ function AcquisitionFields({ plan, setPlan, prefix }) {
 }
 
 const WIZARD_HOUSING_COST_ROW_ID = "wizard-housing-cost";
+const WIZARD_HOUSING_REPAIR_ROW_ID = "wizard-housing-repair";
+const WIZARD_HOUSING_TAX_ROW_ID = "wizard-housing-tax";
+const WIZARD_HOUSING_ROW_IDS = new Set([WIZARD_HOUSING_COST_ROW_ID, WIZARD_HOUSING_REPAIR_ROW_ID, WIZARD_HOUSING_TAX_ROW_ID]);
+
+function RepairAndTaxFields({ plan, setPlan }) {
+  const isCondo = plan.housingPlanPropertyType === "condo";
+  const basePrice = plan.housingPlanBuyMode === "existing" ? (plan.housingPlanAssetValue || 0) : (plan.housingPlanPrice || 0);
+  const suggestedAssessedValue = Math.round(basePrice * PROPERTY_TAX_DEFAULT_ASSESSMENT_RATIO);
+  return (
+    <>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 600, color: INK, margin: "14px 0 8px" }}>
+        <input type="checkbox" checked={!!plan.housingPlanRepairEnabled} onChange={(e) => setPlan({ housingPlanRepairEnabled: e.target.checked })} />
+        修繕費を試算する
+      </label>
+      {plan.housingPlanRepairEnabled && (
+        <div style={{ background: "#FFFDF9", border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 12 }}>
+          <NumInput label="竣工年" value={plan.housingPlanCompletionYear} onChange={(v) => setPlan({ housingPlanCompletionYear: v })} width={90} noComma />
+          {isCondo && (
+            <div style={{ marginTop: 8 }}>
+              <NumInput label="専有面積" value={plan.housingPlanFloorAreaSqm} onChange={(v) => setPlan({ housingPlanFloorAreaSqm: v })} width={90} suffix="㎡" />
+            </div>
+          )}
+          <WizardRefBox>{isCondo ? CONDO_REPAIR_SOURCE : HOUSE_REPAIR_SOURCE}</WizardRefBox>
+        </div>
+      )}
+
+      <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 600, color: INK, margin: "14px 0 8px" }}>
+        <input type="checkbox" checked={!!plan.housingPlanTaxEnabled} onChange={(e) => setPlan({ housingPlanTaxEnabled: e.target.checked })} />
+        固定資産税を試算する
+      </label>
+      {plan.housingPlanTaxEnabled && (
+        <div style={{ background: "#FFFDF9", border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 12 }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <NumInput label="固定資産税評価額" value={plan.housingPlanAssessedValue} onChange={(v) => setPlan({ housingPlanAssessedValue: v })} suffix="万円" />
+            <NumInput label="税率（年率）" value={(plan.housingPlanTaxRate * 100).toFixed(2)} onChange={(v) => setPlan({ housingPlanTaxRate: v / 100 })} width={90} suffix="%" />
+          </div>
+          {basePrice > 0 && (
+            <div style={{ fontSize: 11, color: INK_SOFT, marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              参考値：<span style={{ fontSize: 14, fontWeight: 700, color: INK }}>約{fmt(suggestedAssessedValue)}万円</span>
+              （{plan.housingPlanBuyMode === "existing" ? "推定資産価値" : "物件価格"}の{Math.round(PROPERTY_TAX_DEFAULT_ASSESSMENT_RATIO * 100)}%を目安として算出）
+              <button onClick={() => setPlan({ housingPlanAssessedValue: suggestedAssessedValue })}
+                style={{ fontSize: 11, padding: "3px 8px", borderRadius: 4, border: `1px solid ${GOLD}`, background: GOLD_SOFT, color: INK, cursor: "pointer" }}>
+                この値を使う
+              </button>
+            </div>
+          )}
+          <WizardRefBox>{PROPERTY_TAX_SOURCE}</WizardRefBox>
+        </div>
+      )}
+    </>
+  );
+}
 
 function HousingWizardSlide({ params, setParams, sim, setSim }) {
   const [subsidy, setSubsidy] = useState(params.housingSubsidyAnnual || 0);
@@ -1584,6 +1674,10 @@ function HousingWizardSlide({ params, setParams, sim, setSim }) {
     housingPlanPropertyType: params.housingPlanPropertyType, housingPlanCondition: params.housingPlanCondition,
     housingPlanBuyMode: params.housingPlanBuyMode, housingPlanBalance: params.housingPlanBalance,
     housingPlanAssetValue: params.housingPlanAssetValue,
+    housingPlanRepairEnabled: params.housingPlanRepairEnabled, housingPlanCompletionYear: params.housingPlanCompletionYear,
+    housingPlanFloorAreaSqm: params.housingPlanFloorAreaSqm,
+    housingPlanTaxEnabled: params.housingPlanTaxEnabled, housingPlanAssessedValue: params.housingPlanAssessedValue,
+    housingPlanTaxRate: params.housingPlanTaxRate,
     housingPlanPurchaseYear: params.housingPlanPurchaseYear, housingPlanPrice: params.housingPlanPrice,
     housingPlanDownPayment: params.housingPlanDownPayment, housingPlanRate: params.housingPlanRate,
     housingPlanRateIncrease: params.housingPlanRateIncrease, housingPlanRateCap: params.housingPlanRateCap,
@@ -1607,20 +1701,28 @@ function HousingWizardSlide({ params, setParams, sim, setSim }) {
     const nextParams = { ...plan, housingSubsidyAnnual: subsidy };
     setParams((p) => ({ ...p, ...nextParams }));
 
-    // 住宅費は住宅カテゴリの自由入力行に「試算結果」として書き込む（再度反映すると上書き）。
-    // 他に手入力の行が残っている場合は、重複が無いか確認するよう案内する
+    // 住宅費・修繕費・固定資産税は住宅カテゴリの自由入力行に「試算結果」として書き込む
+    // （再度反映すると同じ行を上書き）。他に手入力の行が残っている場合は重複が無いか案内する
     const result = computeHousingPlan({ ...params, ...nextParams });
-    const arr = YEARS.map((_, i) => Math.round(result.housingCost[i] * 100) / 100);
+    const costArr = YEARS.map((_, i) => Math.round(result.housingCost[i] * 100) / 100);
+    const wizardRows = [{ id: WIZARD_HOUSING_COST_ROW_ID, label: "住宅費（ウィザード試算）", arr: costArr }];
+    if (nextParams.housingPlanRepairEnabled) {
+      const repairArr = nextParams.housingPlanPropertyType === "condo"
+        ? calcCondoRepairSchedule(nextParams.housingPlanCompletionYear, nextParams.housingPlanFloorAreaSqm)
+        : calcHouseRepairSchedule(nextParams.housingPlanCompletionYear);
+      wizardRows.push({ id: WIZARD_HOUSING_REPAIR_ROW_ID, label: "修繕費（試算）", arr: repairArr });
+    }
+    if (nextParams.housingPlanTaxEnabled) {
+      const taxArr = calcPropertyTaxSchedule(nextParams.housingPlanPurchaseYear, nextParams.housingPlanAssessedValue, nextParams.housingPlanTaxRate);
+      wizardRows.push({ id: WIZARD_HOUSING_TAX_ROW_ID, label: "固定資産税（試算）", arr: taxArr });
+    }
     const existingRows = sim.expense.customRows?.housing || [];
-    const hadOtherRows = existingRows.some((r) => r.id !== WIZARD_HOUSING_COST_ROW_ID);
+    const hadOtherRows = existingRows.some((r) => !WIZARD_HOUSING_ROW_IDS.has(r.id));
     setSim((prev) => {
       const next = clone(prev);
       next.expense.customRows = next.expense.customRows || {};
-      const others = (next.expense.customRows.housing || []).filter((r) => r.id !== WIZARD_HOUSING_COST_ROW_ID);
-      next.expense.customRows.housing = [
-        { id: WIZARD_HOUSING_COST_ROW_ID, label: "住宅費（ウィザード試算）", arr },
-        ...others,
-      ];
+      const others = (next.expense.customRows.housing || []).filter((r) => !WIZARD_HOUSING_ROW_IDS.has(r.id));
+      next.expense.customRows.housing = [...wizardRows, ...others];
       return next;
     });
 
@@ -1643,6 +1745,7 @@ function HousingWizardSlide({ params, setParams, sim, setSim }) {
           value={plan.housingPlanPurchaseYear} onChange={(v) => setPlan({ housingPlanPurchaseYear: v })} width={90} noComma />
         <div style={{ height: 10 }} />
         <AcquisitionFields plan={plan} setPlan={setPlan} prefix="housingPlan" />
+        {plan.housingPlanAcquisitionType !== "rent" && <RepairAndTaxFields plan={plan} setPlan={setPlan} />}
       </div>
 
       <NumInput label="住宅補助" value={subsidy} onChange={setSubsidy} suffix="万円/年" />
