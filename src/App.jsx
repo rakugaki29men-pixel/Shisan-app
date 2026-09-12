@@ -599,6 +599,11 @@ function yfSymbolFor(h) {
   return String(ticker);
 }
 
+// 保有銘柄が市場価格の自動取得対象かどうか（yfSymbolForが実際に使う判定と常に一致させる）
+function isAutoFetchable(h) {
+  return yfSymbolFor(h) !== null;
+}
+
 async function fetchJson(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`価格取得サーバーへの接続に失敗しました（${res.status}）`);
@@ -3677,7 +3682,6 @@ function AddHoldingForm({ onAdd, fxRates, cashList, pendingAccountId, onRequestA
       tags: picked.tags && picked.tags.length ? picked.tags : (picked.exchange ? ["個別銘柄"] : ["投信"]),
       memo: picked.memo || "",
       currency: isFund ? "JPY" : (picked.currency || "JPY"),
-      autoFetchable: true,
       searchLabel: isFund ? picked.name : `${picked.exchange}:${picked.ticker}`,
       qtyMode: isFund ? "nav10000" : "shares",
       unitsImplied: isFund ? qty : null,
@@ -3962,7 +3966,7 @@ function HoldingCard({ h, idx, onUpdate, onDelete, fxRates, fmtCur = fmtYen, cas
   const isPickingAccount = cashLink && cashLink.mode === "account" && cashLink.holdingIdx === idx && cashLink.cashIdx === null;
   // 保有数量ゼロはグレー、価格自動反映の対象銘柄は少し濃い背景で見分けやすくする
   const isEmpty = !(displayQty > 0);
-  const cardBg = isEmpty ? "#EFEFEF" : h.autoFetchable ? PAPER : "#fff";
+  const cardBg = isEmpty ? "#EFEFEF" : isAutoFetchable(h) ? PAPER : "#fff";
   const nameColor = isEmpty ? INK_SOFT : INK;
 
   return (
@@ -4095,7 +4099,7 @@ function HoldingCard({ h, idx, onUpdate, onDelete, fxRates, fmtCur = fmtYen, cas
             <button onClick={() => setTradeOpen((o) => (o === "sell" ? null : "sell"))} style={{
               fontSize: 11.5, padding: "6px 10px", borderRadius: 4, border: `1px solid ${SEAL}`, background: tradeOpen === "sell" ? SEAL_SOFT : "#fff", color: INK, cursor: "pointer",
             }}>－ 売却</button>
-            {h.autoFetchable ? (
+            {isAutoFetchable(h) ? (
               <span style={{ fontSize: 10.5, color: h.lastUpdated ? SUMI : "#B8A26A" }}>{h.lastUpdated ? `更新:${h.lastUpdated}` : "自動取得対象"}</span>
             ) : (
               <span style={{ fontSize: 10.5, color: "#B8A26A" }}>手動更新のみ</span>
@@ -4617,7 +4621,7 @@ function PortfolioTab({ holdings, setHoldings, cashList, setCashList, params, se
         <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 12 }}>
           <div style={{ fontSize: 12.5, fontWeight: 600, color: INK, marginBottom: 6 }}>時点指定で価格を取得</div>
           <div style={{ fontSize: 11, color: INK_SOFT, marginBottom: 10 }}>
-            日付を指定すると、その日（休場日の場合は直近の取引日）の終値でETF・個別株・仮想通貨（{holdings.filter((h) => h.autoFetchable).length}件）の評価額を再計算します
+            日付を指定すると、その日（休場日の場合は直近の取引日）の終値でETF・個別株・仮想通貨（{holdings.filter(isAutoFetchable).length}件）の評価額を再計算します
           </div>
           {!PRICE_API_BASE && (
             <div style={{ fontSize: 11, color: SEAL, background: SEAL_SOFT, borderRadius: 4, padding: "6px 8px", marginBottom: 10 }}>
@@ -4780,40 +4784,65 @@ const ASSET_CLASS_COLORS = {
 };
 function colorForAssetCat(cat) { return ASSET_CLASS_COLORS[cat] || "#8A8577"; }
 
-/* 円グラフのラベルが密集する小さい扇形どうしで重ならないよう、
-   同じ側（左/右）に置いた既存の全ラベルとの距離を見て縦にずらしながら
-   引き出し線（本体→折れ点→ラベル）を描く */
-function renderPieLeaderLabel(colors) {
-  const placed = { left: [], right: [] };
+/* 円グラフのラベルが密集する小さい扇形どうしで重ならないよう、縦にずらしながら
+   引き出し線（本体→折れ点→ラベル）を描く。
+   Rechartsはラベルを「データの並び順」でコールバックするため、その順のまま
+   下方向に押し出すと、扇形が上にあるのにラベルが下に来る逆転が起こりうる。
+   そこで初回コールバック時に全扇形の位置をpieDataだけから自前で計算し、
+   左右それぞれ「画面上での高さ」順に並べ替えてから重なり調整することで、
+   常に上にある扇形のラベルが上に来るようにしている（12時位置から時計回りに
+   スイープする前提でPie側のstartAngle/endAngleと角度計算を合わせている）。 */
+function renderPieLeaderLabel(pieData, colors) {
+  const RADIAN = Math.PI / 180;
   const MIN_GAP = 16;
-  return (props) => {
-    const { cx, cy, midAngle, outerRadius, percent, name, index } = props;
-    if (!percent || percent < 0.001) return null;
-    const RADIAN = Math.PI / 180;
-    const cos = Math.cos(-RADIAN * midAngle);
-    const sin = Math.sin(-RADIAN * midAngle);
-    const sx = cx + outerRadius * cos;
-    const sy = cy + outerRadius * sin;
+  const START_ANGLE = 90; // Pieのstartangleと合わせる（12時位置）
+  let cache = null;
+
+  const buildCache = (cx, cy, outerRadius) => {
+    const total = pieData.reduce((s, d) => s + (d.value || 0), 0) || 1;
     const bendR = outerRadius + 10;
-    const mx = cx + bendR * cos;
-    let my = cy + bendR * sin;
-    const isRight = cos >= 0;
-    const arr = placed[isRight ? "right" : "left"];
-    // 同じ側の直前のラベルより下にしか押し出さない一方向の調整なので、
-    // 何度比較しても必ず収束する（往復して固まることがない）
-    if (arr.length && my - arr[arr.length - 1] < MIN_GAP) {
-      my = arr[arr.length - 1] + MIN_GAP;
-    }
-    arr.push(my);
     const legLen = 10;
-    const ex = mx + (isRight ? legLen : -legLen);
+    let cursor = START_ANGLE;
+    const raw = pieData.map((d, index) => {
+      const span = (d.value / total) * 360;
+      const midAngle = cursor - span / 2;
+      cursor -= span;
+      const cos = Math.cos(-RADIAN * midAngle);
+      const sin = Math.sin(-RADIAN * midAngle);
+      const isRight = cos >= 0;
+      const mx = cx + bendR * cos;
+      return {
+        index, name: d.name, percent: d.value / total, isRight,
+        sx: cx + outerRadius * cos, sy: cy + outerRadius * sin,
+        mx, my: cy + bendR * sin, ex: mx + (isRight ? legLen : -legLen),
+      };
+    });
+    [true, false].forEach((wantRight) => {
+      const group = raw.filter((r) => r.isRight === wantRight).sort((a, b) => a.my - b.my);
+      let prevMy = null;
+      group.forEach((r) => {
+        if (prevMy !== null && r.my - prevMy < MIN_GAP) r.my = prevMy + MIN_GAP;
+        prevMy = r.my;
+      });
+    });
+    const map = {};
+    raw.forEach((r) => { map[r.index] = r; });
+    return map;
+  };
+
+  return (props) => {
+    const { cx, cy, outerRadius, percent, index } = props;
+    if (!percent || percent < 0.001) return null;
+    if (!cache) cache = buildCache(cx, cy, outerRadius);
+    const r = cache[index];
+    if (!r) return null;
     const color = (colors && colors[index]) || PIE_PALETTE[index % PIE_PALETTE.length];
-    const pct = `${(percent * 100).toFixed(percent < 0.03 ? 1 : 0)}%`;
+    const pct = `${(r.percent * 100).toFixed(r.percent < 0.03 ? 1 : 0)}%`;
     return (
-      <g key={`pie-label-${name}`}>
-        <path d={`M${sx},${sy} L${mx},${my} L${ex},${my}`} stroke={INK_SOFT} strokeWidth={1} fill="none" />
-        <text x={ex + (isRight ? 3 : -3)} y={my} textAnchor={isRight ? "start" : "end"} dominantBaseline="middle" fontSize={10.5} fontWeight={600} fill={color}>
-          {name} {pct}
+      <g key={`pie-label-${r.name}`}>
+        <path d={`M${r.sx},${r.sy} L${r.mx},${r.my} L${r.ex},${r.my}`} stroke={INK_SOFT} strokeWidth={1} fill="none" />
+        <text x={r.ex + (r.isRight ? 3 : -3)} y={r.my} textAnchor={r.isRight ? "start" : "end"} dominantBaseline="middle" fontSize={10.5} fontWeight={600} fill={color}>
+          {r.name} {pct}
         </text>
       </g>
     );
@@ -4989,7 +5018,7 @@ function AggregationTab({ holdings, cashList, sim, params, setParams, asOfDate, 
       <div style={{ padding: "0 16px", height: 360, background: CARD }}>
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
-            <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={74} label={renderPieLeaderLabel(pieColors)} labelLine={false} isAnimationActive={false}>
+            <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={74} startAngle={90} endAngle={-270} label={renderPieLeaderLabel(pieData, pieColors)} labelLine={false} isAnimationActive={false}>
               {pieData.map((_, i) => <Cell key={i} fill={pieColors[i]} stroke={CARD} strokeWidth={1.5} />)}
             </Pie>
             <Tooltip formatter={(v) => fmtYen(v)} contentStyle={{ fontSize: 12 }} />
