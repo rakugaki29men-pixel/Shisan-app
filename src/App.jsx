@@ -2631,7 +2631,59 @@ function SettingsSection({ title, children }) {
   );
 }
 
-function SettingsModal({ sim, setSim, params, setParams, onOpenFamily, onOpenWizard, onExport, onImport, onReset, onClose }) {
+// セットアップがどこまで済んでいるかの簡易チェックリスト（叩き案：判定はラフな有無ベース）
+function SetupDashboardCard({ items }) {
+  const doneCount = items.filter((it) => it.done).length;
+  return (
+    <div style={{ background: CARD, border: `1px solid ${PAPER_LINE}`, borderRadius: 5, padding: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600, color: INK }}>セットアップ状況</div>
+        <div style={{ fontSize: 11, color: INK_SOFT }}>{doneCount} / {items.length} 完了</div>
+      </div>
+      <div style={{ height: 6, borderRadius: 3, background: PAPER_LINE, overflow: "hidden", marginBottom: 10 }}>
+        <div style={{ height: "100%", width: `${(doneCount / items.length) * 100}%`, background: GOLD, transition: "width 0.2s" }} />
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {items.map((it) => (
+          <div key={it.key} style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8,
+            padding: "7px 9px", borderRadius: 4, background: it.done ? "#F3F6EF" : "#FFF9EE",
+            border: `1px solid ${it.done ? "#CFE0C0" : PAPER_LINE}`,
+          }}>
+            <div style={{ fontSize: 12, color: INK, display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ color: it.done ? "#5C8A4A" : "#B8A26A" }}>{it.done ? "✓" : "○"}</span>
+              {it.label}
+            </div>
+            {!it.done && it.onGo && (
+              <button onClick={it.onGo} style={{ fontSize: 10.5, padding: "4px 8px", borderRadius: 4, border: `1px solid ${GOLD}`, background: "#fff", color: INK, cursor: "pointer", whiteSpace: "nowrap" }}>
+                設定する →
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 10, color: INK_SOFT, marginTop: 8 }}>
+        ※ 済み／未設定の判定は簡易チェックです（値がゼロのまま意図している場合も「未設定」と出ることがあります）
+      </div>
+    </div>
+  );
+}
+
+function SettingsModal({ sim, setSim, params, setParams, family, holdings, cashList, onOpenFamily, onOpenWizard, onGoToPortfolio, onGoToSimTab, onExport, onImport, onReset, onClose }) {
+  const familyDone = (family || []).some((m) => (m.id === "father" || m.id === "mother") && m.birthYear != null);
+  const housingDone = (sim.expense.customRows?.housing || []).length > 0;
+  const incomeDone = (sim.income.father || []).some((v) => v > 0) || (sim.income.mother || []).some((v) => v > 0);
+  const portfolioDone = (holdings || []).length > 0;
+  const cashDone = (cashList || []).length > 0;
+  const initialAssetDone = (params.securities0 || 0) > 0 || (params.cash0 || 0) > 0;
+  const setupItems = [
+    { key: "family", label: "家族構成（生年月日）", done: familyDone, onGo: onOpenFamily },
+    { key: "income", label: "収入（父・母）", done: incomeDone, onGo: onGoToSimTab },
+    { key: "housing", label: "住宅費用（住宅ウィザード）", done: housingDone, onGo: () => onOpenWizard("housing") },
+    { key: "portfolio", label: "保有資産（ポートフォリオ）の登録", done: portfolioDone, onGo: onGoToPortfolio },
+    { key: "cash", label: "現金口座の登録", done: cashDone, onGo: onGoToPortfolio },
+    { key: "initialAsset", label: "初期資産・初期現金（下のグローバル設定で入力）", done: initialAssetDone, onGo: null },
+  ];
   return (
     <div style={{
       position: "fixed", inset: 0, background: PAPER, zIndex: 200, overflowY: "auto",
@@ -2643,10 +2695,11 @@ function SettingsModal({ sim, setSim, params, setParams, onOpenFamily, onOpenWiz
       </div>
 
       <div style={{ padding: "14px 16px 40px", display: "flex", flexDirection: "column", gap: 18 }}>
+        <SetupDashboardCard items={setupItems} />
         <SettingsSection title="家族・費用の入力">
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button onClick={onOpenFamily} style={settingsBtnStyle}>👪 家族構成を編集</button>
-            <button onClick={onOpenWizard} style={settingsBtnStyle}>🧮 費用自動試算ウィザード</button>
+            <button onClick={() => onOpenWizard()} style={settingsBtnStyle}>🧮 費用自動試算ウィザード</button>
           </div>
         </SettingsSection>
 
@@ -5826,8 +5879,11 @@ export default function App() {
       )}
       {showSettings && (
         <SettingsModal sim={sim} setSim={setSim} params={params} setParams={setParams}
+          family={family} holdings={holdings} cashList={cashList}
           onOpenFamily={() => { setShowSettings(false); setShowFamilyModal(true); }}
-          onOpenWizard={() => { setShowSettings(false); setShowCostWizard(true); }}
+          onOpenWizard={(step) => { setShowSettings(false); if (step) setCostWizardStep(step); setShowCostWizard(true); }}
+          onGoToPortfolio={() => { setShowSettings(false); setTab("portfolio"); }}
+          onGoToSimTab={() => { setShowSettings(false); setTab("sim"); }}
           onExport={exportData} onImport={triggerImport} onReset={resetAll}
           onClose={() => setShowSettings(false)} />
       )}
